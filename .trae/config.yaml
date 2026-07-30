@@ -1,0 +1,51 @@
+# Trae Workspace Configuration
+# 社区邻里有偿互助平台 - 微信小程序
+
+project:
+  name: neighborhood-help
+  description: 社区邻里有偿互助微信小程序（发单/接单/支付/评价闭环）
+  version: 0.1.0
+
+model:
+  # 默认使用的 LLM
+  default: claude-4-sonnet
+  # 重任务（如架构设计）可切换
+  heavy: claude-4-opus
+  # 轻任务（如改文案）可切换
+  light: claude-4-haiku
+
+rules:
+  # 全局编码规范
+  - "禁止使用 any 类型，必须显式声明类型"
+  - "禁止 console.log，使用统一 logger"
+  - "禁止硬编码密钥/密码，使用环境变量或配置中心"
+  - "所有 API 响应必须统一格式 { code, message, data }"
+  - "数据库迁移必须可回滚"
+  - "提交前必须通过 ESLint + Prettier 检查"
+  - "新增 API 必须同步更新 Swagger 文档"
+  - "敏感操作必须写审计日志"
+
+context:
+  # 自动注入到每个 Prompt 的上下文
+  auto_inject:
+    - .trae/memory.md
+    - specs/01-auth.md
+    - specs/02-task.md
+
+paths:
+  prompts: prompts/
+  tasks: tasks/
+  specs: specs/
+  output: dist/
+
+execution:
+  # 任务执行模式
+  mode: sequential          # sequential | parallel
+  max_parallel: 3           # parallel 模式下最大并发数
+  stop_on_error: true       # 遇到错误立即停止
+  auto_commit: false        # 每个任务完成后自动 git commit
+
+git:
+  branch_strategy: feature   # 每个任务创建独立 feature 分支
+  commit_prefix: "[Trae]"
+  require_pr: true

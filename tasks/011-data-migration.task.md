@@ -1,0 +1,21 @@
+# Task 011: 数据库迁移 + 备份 + 脱敏
+
+- **Prompts**:
+  - `prompts/backend/15-data-migration-backup.prompt.md`
+  - `prompts/bff/prisma-schema.prompt.md`
+- **执行顺序**: 11
+- **状态**: pending
+- **依赖**: Task 001
+- **预估时间**: 2 小时
+- **说明**: Prisma 全量 Schema + 迁移脚本 + 备份/恢复/脱敏/GDPR 导出
+- **验收**:
+  - [ ] 15 张表全部创建
+  - [ ] 迁移可重复执行（幂等）
+  - [ ] 全量备份自动上传 S3/COS
+  - [ ] 增量备份（Binlog）正常
+  - [ ] 恢复脚本验证通过
+  - [ ] 脱敏后数据保留统计特征
+  - [ ] GDPR 导出接口返回加密文件
+  - [ ] 账号注销后数据匿名化
+  - [ ] Cron 定时任务生效
+  - [ ] 备份保留 30 天自动清理

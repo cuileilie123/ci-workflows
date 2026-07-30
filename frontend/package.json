@@ -1,0 +1,42 @@
+{
+  "name": "frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev:mp-weixin": "uni -p mp-weixin",
+    "dev:h5": "uni",
+    "build:mp-weixin": "uni build -p mp-weixin",
+    "build:h5": "uni build",
+    "type-check": "vue-tsc --noEmit",
+    "lint": "eslint --ext .js,.ts,.vue src --fix",
+    "format": "prettier --write \"src/**/*.{js,ts,vue,scss}\""
+  },
+  "dependencies": {
+    "@dcloudio/uni-app": "3.0.0-5010520260709002",
+    "@dcloudio/uni-app-plus": "3.0.0-5010520260709002",
+    "@dcloudio/uni-components": "3.0.0-5010520260709002",
+    "@dcloudio/uni-h5": "3.0.0-5010520260709002",
+    "@dcloudio/uni-mp-weixin": "3.0.0-5010520260709002",
+    "pinia": "^2.1.7",
+    "vue": "^3.4.21",
+    "vue-i18n": "^9.1.9"
+  },
+  "devDependencies": {
+    "@dcloudio/types": "^3.4.8",
+    "@dcloudio/uni-cli-shared": "3.0.0-5010520260709002",
+    "@dcloudio/vite-plugin-uni": "3.0.0-5010520260709002",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0",
+    "@vue/tsconfig": "^0.1.3",
+    "@vue/runtime-core": "^3.4.21",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-vue": "^9.27.0",
+    "prettier": "^3.3.3",
+    "sass": "^1.77.8",
+    "typescript": "^5.5.4",
+    "vite": "5.2.8",
+    "vue-eslint-parser": "^9.4.3",
+    "vue-tsc": "^2.0.29"
+  }
+}

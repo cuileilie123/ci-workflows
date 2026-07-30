@@ -1,0 +1,21 @@
+# Task 003: 任务发布 + 附近列表
+
+- **Prompts**:
+  - `prompts/frontend/03-task-publish.prompt.md`
+  - `prompts/frontend/04-task-list.prompt.md`
+  - `prompts/bff/03-task-service.prompt.md`
+- **执行顺序**: 3
+- **状态**: pending
+- **依赖**: Task 002
+- **预估时间**: 3 小时
+- **说明**: 实现发单（表单+地图+图片）→ 附近任务 Feed 流（GeoHash + 缓存）
+- **验收**:
+  - [ ] 发布任务表单校验通过
+  - [ ] 图片上传到 COS 成功
+  - [ ] 地图选点返回正确坐标
+  - [ ] 附近列表按距离排序
+  - [ ] 下拉刷新 + 上拉加载正常
+  - [ ] 分类筛选正确
+  - [ ] 搜索防抖生效
+  - [ ] Redis 缓存命中率 > 80%
+  - [ ] 敏感内容被拦截

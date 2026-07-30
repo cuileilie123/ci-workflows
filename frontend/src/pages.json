@@ -1,0 +1,16 @@
+{
+  "pages": [
+    {
+      "path": "pages/index/index",
+      "style": {
+        "navigationBarTitleText": "邻里互助"
+      }
+    }
+  ],
+  "globalStyle": {
+    "navigationBarTextStyle": "white",
+    "navigationBarTitleText": "邻里互助",
+    "navigationBarBackgroundColor": "#4CAF50",
+    "backgroundColor": "#F8F8F8"
+  }
+}

@@ -1,0 +1,79 @@
+# ===== 依赖 =====
+node_modules/
+.pnpm-store/
+
+# ===== 构建产物 =====
+dist/
+build/
+out/
+.uno.css
+.tmp/
+.cache/
+
+# UniApp / 小程序构建产物
+frontend/dist/
+frontend/.vite/
+
+# NestJS 构建产物
+bff/dist/
+
+# ===== 环境变量与密钥（禁止提交）=====
+.env
+.env.local
+.env.*.local
+*.env
+
+# 但保留模板
+!.env.example
+
+# 微信支付/小程序密钥
+*-cert.pem
+*-key.pem
+apiclient_*.pem
+
+# ===== 日志 =====
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ===== IDE / 编辑器 =====
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ===== TypeScript =====
+*.tsbuildinfo
+
+# ===== 测试覆盖率 =====
+coverage/
+*.lcov
+
+# ===== Prisma =====
+bff/prisma/migrations/dev.db
+bff/prisma/*.db-journal
+
+# ===== Docker / 运行时数据 =====
+mysql_data/
+redis_data/
+es_data/
+mongo_data/
+
+# ===== Go =====
+backend/risk-service/risk-service
+backend/risk-service/coverage.out
+
+# ===== Java =====
+backend/admin-service/target/
+*.class
+
+# ===== Trae 本地缓存 =====
+.trae/cache/

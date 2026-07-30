@@ -1,0 +1,22 @@
+# Task 010: 运营管理后台
+
+- **Prompts**:
+  - `prompts/backend/09-admin-dashboard.prompt.md`
+  - `prompts/backend/10-mq-events.prompt.md`
+- **执行顺序**: 10
+- **状态**: pending
+- **依赖**: Task 003, 005, 007, 008, 009
+- **预估时间**: 4 小时
+- **说明**: Vue3+Element Plus 前端 + Spring Boot 后端 + RabbitMQ 事件驱动
+- **验收**:
+  - [ ] 管理员登录（独立 JWT + 角色鉴权）
+  - [ ] 数据看板实时刷新（WebSocket 推送）
+  - [ ] 用户搜索/筛选/封禁/信用分调整
+  - [ ] 订单详情/手动退款/取消/补偿
+  - [ ] 内容审核队列（图片对比 + 批量操作）
+  - [ ] 客服工单流转（分配/回复/关闭/满意度）
+  - [ ] 活动 CRUD + AB 测试数据
+  - [ ] 数据导出 CSV
+  - [ ] 审计日志记录完整
+  - [ ] RabbitMQ 事件链路通畅
+  - [ ] Docker 部署成功

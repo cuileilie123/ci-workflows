@@ -1,0 +1,47 @@
+groups:
+  - name: service_alerts
+    rules:
+      - alert: HighErrorRate
+        expr: |
+          (sum(rate(http_requests_total{status=~"5.."}[5m])) by (service)
+          / sum(rate(http_requests_total[5m])) by (service)) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.service }} 5xx 错误率 > 5%"
+          description: "当前错误率: {{ $value | humanizePercentage }}"
+
+      - alert: HighLatencyP99
+        expr: |
+          histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, service))
+          > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.service }} P99 延迟 > 2s"
+
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis 不可用"
+
+      - alert: MySQLHighConnections
+        expr: mysql_global_status_threads_connected > 80
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "MySQL 连接数过高: {{ $value }}"
+
+      - alert: QueueBacklog
+        expr: rabbitmq_queue_messages_ready > 10000
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "队列积压: {{ $value }} 条消息"
