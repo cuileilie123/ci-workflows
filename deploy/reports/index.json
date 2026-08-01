@@ -1,0 +1,10 @@
+﻿[{
+    "timestamp":  "2026-07-31T23:50:21.4805960+08:00",
+    "file":  "pr-comment-20260731-235021.json",
+    "status":  "FAIL",
+    "pass":  35,
+    "total":  37,
+    "pass_rate":  94.6,
+    "duration":  285,
+    "mode":  "simulate"
+}]

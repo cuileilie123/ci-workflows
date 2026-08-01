@@ -1,0 +1,674 @@
+# ============================================================
+# 备份恢复测试 — PR 自动评论
+# ============================================================
+# 当 PR 涉及备份/部署相关文件时，自动执行故障排查测试
+# 测试失败时在 PR 下留言，包含失败详情
+# 测试通过时更新评论为通过状态
+#
+# 触发条件: PR 到 main/develop 分支，且修改了以下文件:
+#   - scripts/**        (备份/恢复/测试脚本)
+#   - deploy/**          (部署配置)
+#   - docker-compose*.yml (Docker 编排)
+#   - Dockerfile*        (镜像构建)
+# ============================================================
+
+name: 备份恢复测试 (PR 评论)
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'scripts/**'
+      - 'deploy/**'
+      - 'docker-compose*.yml'
+      - 'Dockerfile*'
+      - '.github/workflows/backup-test-pr.yml'
+
+permissions:
+  pull-requests: write
+  contents: read
+
+env:
+  MYSQL_PASSWORD: root123
+  MYSQL_DATABASE: neighborhood_help
+  PASS_RATE_THRESHOLD: "90"
+
+jobs:
+  backup-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      # ============================================================
+      # 1. Checkout 代码
+      # ============================================================
+      - name: Checkout 代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 打印运行环境信息
+        run: |
+          echo "============================================================"
+          echo "  运行环境信息"
+          echo "============================================================"
+          echo "GitHub Ref:        ${{ github.ref }}"
+          echo "GitHub SHA:        ${{ github.sha }}"
+          echo "PR Number:         ${{ github.event.pull_request.number }}"
+          echo "PR Title:          ${{ github.event.pull_request.title }}"
+          echo "PR Source Branch:  ${{ github.head_ref }}"
+          echo "PR Target Branch:  ${{ github.base_ref }}"
+          echo "Actor:             ${{ github.actor }}"
+          echo "Run ID:            ${{ github.run_id }}"
+          echo "============================================================"
+          echo ""
+          echo "Docker 版本:"
+          docker version --format '  Server: {{.Server.Version}}  Client: {{.Client.Version}}'
+          echo ""
+          echo "Docker Compose 版本:"
+          docker compose version
+          echo ""
+          echo "宿主机磁盘空间:"
+          df -h / | tail -1
+          echo ""
+          echo "宿主机内存:"
+          free -h | head -2
+          echo ""
+
+      # ============================================================
+      # 2. 启动 MySQL 服务
+      # ============================================================
+      - name: 启动 MySQL
+        id: mysql-start
+        run: |
+          set -euo pipefail
+          echo "============================================================"
+          echo "  Step 2: 启动 MySQL 服务"
+          echo "============================================================"
+
+          echo "[INFO] 读取 docker-compose.yml 中的 MySQL 配置..."
+          docker compose config --services 2>/dev/null | grep -qx mysql && echo "[OK] mysql 服务定义存在" || {
+            echo "::error::docker-compose.yml 中未找到 mysql 服务"
+            exit 1
+          }
+
+          echo "[INFO] 启动 MySQL 容器..."
+          set +e
+          docker compose up -d mysql 2>&1 | sed 's/^/  /'
+          MYSQL_UP_EXIT=${PIPESTATUS[0]}
+          set -e
+          if [ $MYSQL_UP_EXIT -ne 0 ]; then
+            echo "::error::MySQL 容器启动失败 (exit=$MYSQL_UP_EXIT)"
+            exit 1
+          fi
+          echo ""
+
+          echo "[INFO] 等待 MySQL 就绪 (最多 60 秒)..."
+          MYSQL_READY=false
+          for i in $(seq 1 30); do
+            if docker exec nh-mysql mysqladmin ping -uroot -p${{ env.MYSQL_PASSWORD }} --silent 2>/dev/null; then
+              echo "[OK] MySQL 已就绪 (第 ${i} 次检查, 耗时 $((i*2))s)"
+              MYSQL_READY=true
+              break
+            fi
+            echo "  等待中... ($i/30)"
+            sleep 2
+          done
+
+          if [ "$MYSQL_READY" != "true" ]; then
+            echo "::error::MySQL 启动超时"
+            echo "[DEBUG] MySQL 容器状态:"
+            docker ps -a --filter name=nh-mysql --format '  {{.Status}}'
+            echo "[DEBUG] MySQL 容器日志 (最后 30 行):"
+            docker logs --tail 30 nh-mysql 2>&1 | sed 's/^/  /'
+            exit 1
+          fi
+
+          echo ""
+          echo "[INFO] MySQL 版本信息:"
+          docker exec nh-mysql mysql -uroot -p${{ env.MYSQL_PASSWORD }} -V 2>/dev/null
+          echo ""
+
+          echo "[INFO] MySQL 数据库列表:"
+          docker exec nh-mysql mysql -uroot -p${{ env.MYSQL_PASSWORD }} -e "SHOW DATABASES" 2>/dev/null | sed 's/^/  /'
+          echo ""
+
+      # ============================================================
+      # 3. 构建并启动备份调度器
+      # ============================================================
+      - name: 构建并启动备份调度器
+        id: scheduler-start
+        run: |
+          set -euo pipefail
+          echo "============================================================"
+          echo "  Step 3: 构建并启动备份调度器"
+          echo "============================================================"
+
+          echo "[INFO] 检查 docker-compose.backup.yml 是否存在..."
+          if [ ! -f docker-compose.backup.yml ]; then
+            echo "::error::docker-compose.backup.yml 不存在"
+            exit 1
+          fi
+          echo "[OK] docker-compose.backup.yml 存在"
+          echo ""
+
+          echo "[INFO] 检查 Dockerfile.backup 是否存在..."
+          if [ ! -f Dockerfile.backup ]; then
+            echo "::error::Dockerfile.backup 不存在"
+            exit 1
+          fi
+          echo "[OK] Dockerfile.backup 存在"
+          echo ""
+
+          echo "[INFO] 构建备份调度器镜像..."
+          set +e
+          docker compose -f docker-compose.yml -f docker-compose.backup.yml build backup-scheduler 2>&1 | sed 's/^/  /'
+          BUILD_EXIT=${PIPESTATUS[0]}
+          set -e
+          if [ $BUILD_EXIT -ne 0 ]; then
+            echo "::error::镜像构建失败 (exit=$BUILD_EXIT)"
+            exit 1
+          fi
+          echo "[OK] 镜像构建成功"
+          echo ""
+
+          echo "[INFO] 启动备份调度器容器..."
+          set +e
+          docker compose -f docker-compose.yml -f docker-compose.backup.yml up -d backup-scheduler 2>&1 | sed 's/^/  /'
+          UP_EXIT=${PIPESTATUS[0]}
+          set -e
+          if [ $UP_EXIT -ne 0 ]; then
+            echo "::error::容器启动失败 (exit=$UP_EXIT)"
+            exit 1
+          fi
+          echo ""
+
+          echo "[INFO] 等待备份调度器就绪 (最多 30 秒)..."
+          SCHEDULER_READY=false
+          for i in $(seq 1 15); do
+            if docker exec nh-backup-scheduler pgrep cron > /dev/null 2>&1; then
+              echo "[OK] 备份调度器已就绪 (第 ${i} 次检查, 耗时 $((i*2))s)"
+              SCHEDULER_READY=true
+              break
+            fi
+            echo "  等待中... ($i/15)"
+            sleep 2
+          done
+
+          if [ "$SCHEDULER_READY" != "true" ]; then
+            echo "::error::备份调度器启动超时"
+            echo "[DEBUG] 容器状态:"
+            docker ps -a --filter name=nh-backup-scheduler --format '  {{.Status}}'
+            echo "[DEBUG] 容器日志 (最后 50 行):"
+            docker logs --tail 50 nh-backup-scheduler 2>&1 | sed 's/^/  /'
+            exit 1
+          fi
+
+          echo ""
+          echo "[INFO] 备份调度器容器状态:"
+          docker ps --filter name=nh-backup-scheduler --format '  状态: {{.Status}} | {{.Ports}}'
+          echo ""
+
+          echo "[INFO] 验证关键脚本是否存在..."
+          for script in test-fault-recovery.sh parse_test_report.py pr-comment.py backup.sh restore.sh verify-backup.sh; do
+            if docker exec nh-backup-scheduler test -f /scripts/$script 2>/dev/null; then
+              echo "  [OK] /scripts/$script"
+            else
+              echo "  [WARN] /scripts/$script 不存在"
+            fi
+          done
+          echo ""
+
+          echo "[INFO] 验证环境变量文件 /tmp/backup-env.sh..."
+          if docker exec nh-backup-scheduler test -f /tmp/backup-env.sh 2>/dev/null; then
+            echo "[OK] 环境变量文件存在"
+            echo "[DEBUG] 环境变量文件内容 (隐藏密码):"
+            docker exec nh-backup-scheduler cat /tmp/backup-env.sh 2>/dev/null | sed 's/MYSQL_PASSWORD=.*/MYSQL_PASSWORD=***/' | sed 's/^/  /'
+          else
+            echo "[WARN] 环境变量文件不存在，测试可能需要手动 source"
+          fi
+          echo ""
+
+      # ============================================================
+      # 4. 初始化数据库表结构
+      # ============================================================
+      - name: 初始化数据库
+        id: db-init
+        run: |
+          set -euo pipefail
+          echo "============================================================"
+          echo "  Step 4: 初始化数据库表结构"
+          echo "============================================================"
+
+          echo "[INFO] 等待 backup-init.sh 完成 (5s)..."
+          sleep 5
+
+          echo "[INFO] 检查数据库表数量..."
+          TABLE_COUNT=$(docker exec nh-mysql mysql -uroot -p${{ env.MYSQL_PASSWORD }} -N -e \
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${{ env.MYSQL_DATABASE }}'" 2>/dev/null || echo 0)
+          TABLE_COUNT="${TABLE_COUNT:-0}"
+          echo "  当前表数量: $TABLE_COUNT"
+
+          if [ "$TABLE_COUNT" -eq 0 ]; then
+            echo "[INFO] 表不存在，创建最小化表结构..."
+            docker exec nh-mysql mysql -uroot -p${{ env.MYSQL_PASSWORD }} -e "
+              USE ${{ env.MYSQL_DATABASE }};
+              CREATE TABLE IF NOT EXISTS users (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                openid VARCHAR(64) UNIQUE,
+                nickname VARCHAR(128),
+                phone VARCHAR(20),
+                credit_score INT DEFAULT 100,
+                role VARCHAR(20) DEFAULT 'USER',
+                status VARCHAR(20) DEFAULT 'ACTIVE',
+                updated_at DATETIME(3)
+              );
+              CREATE TABLE IF NOT EXISTS wallets (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                user_id BIGINT,
+                balance DECIMAL(10,2) DEFAULT 0,
+                frozen DECIMAL(10,2) DEFAULT 0,
+                updated_at DATETIME(3)
+              );
+              CREATE TABLE IF NOT EXISTS tasks (
+                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                publisher_id BIGINT,
+                title VARCHAR(256),
+                description TEXT,
+                price DECIMAL(10,2),
+                lat DECIMAL(10,7),
+                lng DECIMAL(10,7),
+                geohash VARCHAR(20),
+                address VARCHAR(512),
+                category VARCHAR(50),
+                images JSON,
+                status VARCHAR(20) DEFAULT 'OPEN',
+                expire_at DATETIME,
+                view_count INT DEFAULT 0,
+                updated_at DATETIME(3)
+              );
+            " 2>/dev/null
+            echo "[OK] 表结构创建完成"
+          else
+            echo "[OK] 表已存在，跳过创建"
+          fi
+
+          echo ""
+          echo "[INFO] 当前数据库表列表:"
+          docker exec nh-mysql mysql -uroot -p${{ env.MYSQL_PASSWORD }} -e \
+            "SHOW TABLES FROM ${{ env.MYSQL_DATABASE }}" 2>/dev/null | sed 's/^/  /'
+          echo ""
+
+      # ============================================================
+      # 5. 执行故障排查测试
+      # ============================================================
+      - name: 执行故障排查测试
+        id: run-test
+        run: |
+          echo "============================================================"
+          echo "  Step 5: 执行故障排查测试 (37 项)"
+          echo "============================================================"
+
+          echo "[INFO] 验证测试脚本可执行..."
+          docker exec nh-backup-scheduler bash -c "test -x /scripts/test-fault-recovery.sh && echo '  [OK] 可执行' || echo '  [WARN] 无执行权限，将用 bash 调用'"
+          echo ""
+
+          echo "[INFO] 开始执行测试..."
+          START_TIME=$(date +%s)
+          echo "  开始时间: $(date '+%Y-%m-%d %H:%M:%S')"
+
+          # 执行测试，保存输出
+          docker exec nh-backup-scheduler bash -c \
+            "source /tmp/backup-env.sh && bash /scripts/test-fault-recovery.sh" \
+            > test-output.log 2>&1
+          TEST_EXIT_CODE=$?
+
+          END_TIME=$(date +%s)
+          ELAPSED=$((END_TIME - START_TIME))
+          echo "  结束时间: $(date '+%Y-%m-%d %H:%M:%S')"
+          echo "  总耗时:   ${ELAPSED}s"
+          echo ""
+
+          echo "[INFO] 测试退出码: $TEST_EXIT_CODE"
+          if [ $TEST_EXIT_CODE -eq 0 ]; then
+            echo "[OK] 测试全部通过"
+          else
+            echo "[WARN] 测试存在失败项 (退出码=$TEST_EXIT_CODE)"
+          fi
+          echo ""
+
+          # 保存到 GitHub Actions 输出
+          echo "exit_code=$TEST_EXIT_CODE" >> $GITHUB_OUTPUT
+          echo "duration=$ELAPSED" >> $GITHUB_OUTPUT
+
+          echo "[INFO] 测试输出日志 (完整):"
+          echo "------------------------------------------------------------"
+          cat test-output.log
+          echo "------------------------------------------------------------"
+          echo ""
+
+          echo "[INFO] 日志文件大小: $(wc -c < test-output.log) bytes, $(wc -l < test-output.log) 行"
+          echo ""
+
+          echo "[INFO] 将日志复制到容器内供 Python 解析..."
+          docker cp test-output.log nh-backup-scheduler:/tmp/test.log
+          echo "[OK] 日志已复制到容器 /tmp/test.log"
+
+      # ============================================================
+      # 6. 解析测试报告 (JSON)
+      # ============================================================
+      - name: 解析测试报告
+        id: parse
+        run: |
+          echo "============================================================"
+          echo "  Step 6: 解析测试报告 (JSON)"
+          echo "============================================================"
+
+          echo "[INFO] 在容器内执行 Python 解析器..."
+          docker exec nh-backup-scheduler python3 /scripts/parse_test_report.py \
+            --file /tmp/test.log \
+            --json \
+            --duration ${{ steps.run-test.outputs.duration }} \
+            > test-report.json 2>/tmp/parse-stderr.log
+          PARSE_EXIT=$?
+
+          if [ $PARSE_EXIT -ne 0 ]; then
+            echo "::error::JSON 报告解析失败 (exit=$PARSE_EXIT)"
+            echo "[DEBUG] stderr 输出:"
+            cat /tmp/parse-stderr.log | sed 's/^/  /'
+            echo "[DEBUG] test-output.log 最后 20 行:"
+            tail -20 test-output.log | sed 's/^/  /'
+            exit 1
+          fi
+          echo "[OK] JSON 报告解析成功"
+          echo ""
+
+          echo "[INFO] 验证 JSON 文件..."
+          if [ ! -s test-report.json ]; then
+            echo "::error::test-report.json 为空或不存在"
+            exit 1
+          fi
+          echo "  文件大小: $(wc -c < test-report.json) bytes"
+          echo ""
+
+          echo "[INFO] 提取关键字段..."
+          OVERALL=$(python3 -c "import json; print(json.load(open('test-report.json'))['overall_status'])" 2>/dev/null)
+          EXIT_CODE=$(python3 -c "import json; print(json.load(open('test-report.json'))['exit_code'])" 2>/dev/null)
+          PASS_RATE=$(python3 -c "import json; print(json.load(open('test-report.json'))['summary']['pass_rate'])" 2>/dev/null)
+
+          if [ -z "$OVERALL" ] || [ -z "$EXIT_CODE" ] || [ -z "$PASS_RATE" ]; then
+            echo "::error::无法提取 overall_status / exit_code / pass_rate"
+            echo "[DEBUG] JSON 文件内容 (前 500 字符):"
+            head -c 500 test-report.json | sed 's/^/  /'
+            exit 1
+          fi
+
+          echo "  overall_status: $OVERALL"
+          echo "  exit_code:      $EXIT_CODE"
+          echo "  pass_rate:      $PASS_RATE%"
+          echo ""
+
+          echo "overall_status=$OVERALL" >> $GITHUB_OUTPUT
+          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+          echo "pass_rate=$PASS_RATE" >> $GITHUB_OUTPUT
+
+          echo "[INFO] JSON 报告摘要:"
+          echo "------------------------------------------------------------"
+          python3 -c "
+          import json
+          r = json.load(open('test-report.json'))
+          s = r['summary']
+          print(f'  状态:     {r[\"overall_status\"]}')
+          print(f'  测试场景: {s[\"total_cases\"]}')
+          print(f'  测试项:   {s[\"total_items\"]}')
+          print(f'  通过:     {s[\"pass\"]}')
+          print(f'  失败:     {s[\"fail\"]}')
+          print(f'  警告:     {s[\"warn\"]}')
+          print(f'  通过率:   {s[\"pass_rate\"]}%')
+          print(f'  耗时:     {r[\"duration_sec\"]}s')
+          print(f'  数据库:   {r.get(\"database\", \"N/A\")}')
+          print(f'  时间戳:   {r[\"timestamp\"]}')
+          if r['failed_cases']:
+              print()
+              print('  失败场景:')
+              for fc in r['failed_cases']:
+                  print(f'    - {fc[\"tc_id\"]}: {fc[\"title\"]}')
+                  for item in fc.get('failed_items', []):
+                      print(f'        {item.get(\"message\", \"\")}')
+          "
+          echo "------------------------------------------------------------"
+          echo ""
+
+          echo "[DEBUG] JSON 文件完整内容:"
+          cat test-report.json | python3 -m json.tool | sed 's/^/  /'
+          echo ""
+
+      # ============================================================
+      # 7. 生成 PR 评论内容
+      # ============================================================
+      - name: 生成 PR 评论
+        id: comment
+        run: |
+          echo "============================================================"
+          echo "  Step 7: 生成 PR 评论 (HTML 表格)"
+          echo "============================================================"
+
+          echo "[INFO] 将 JSON 报告复制到容器内..."
+          docker cp test-report.json nh-backup-scheduler:/tmp/test-report.json
+          echo "[OK] JSON 报告已复制"
+          echo ""
+
+          echo "[INFO] 在容器内生成 HTML 评论..."
+          docker exec nh-backup-scheduler python3 /scripts/pr-comment.py \
+            --report /tmp/test-report.json \
+            --html \
+            --output /tmp/pr-comment.md 2>/tmp/comment-stderr.log
+          COMMENT_EXIT=$?
+
+          if [ $COMMENT_EXIT -ne 0 ]; then
+            echo "::error::PR 评论生成失败 (exit=$COMMENT_EXIT)"
+            echo "[DEBUG] stderr 输出:"
+            cat /tmp/comment-stderr.log | sed 's/^/  /'
+            exit 1
+          fi
+          echo "[OK] HTML 评论生成成功"
+          echo ""
+
+          echo "[INFO] 复制评论到宿主机..."
+          docker cp nh-backup-scheduler:/tmp/pr-comment.md pr-comment.md
+          echo "[OK] 评论文件已复制"
+          echo ""
+
+          echo "[INFO] 评论文件信息:"
+          echo "  文件大小: $(wc -c < pr-comment.md) bytes"
+          echo "  行数:     $(wc -l < pr-comment.md)"
+          echo ""
+
+          echo "[INFO] 验证评论包含 HTML 表格..."
+          if grep -q '<table>' pr-comment.md; then
+            echo "  [OK] 包含 HTML 表格"
+            TABLE_COUNT=$(grep -c '<table>' pr-comment.md)
+            echo "  [INFO] 表格数量: $TABLE_COUNT"
+          else
+            echo "  [WARN] 未检测到 HTML 表格"
+          fi
+
+          echo ""
+          echo "[INFO] 生成的 PR 评论内容:"
+          echo "============================================================"
+          cat pr-comment.md
+          echo "============================================================"
+          echo ""
+
+      # ============================================================
+      # 8. 发布/更新 PR 评论
+      # ============================================================
+      - name: 发布 PR 评论
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            console.log('============================================================');
+            console.log('  Step 8: 发布/更新 PR 评论');
+            console.log('============================================================');
+
+            // 读取评论文件
+            const commentBody = fs.readFileSync('pr-comment.md', 'utf-8');
+            const marker = '<!-- backup-test-pr-comment -->';
+            console.log(`[INFO] 评论文件大小: ${commentBody.length} 字符`);
+            console.log(`[INFO] PR 编号: ${context.issue.number}`);
+
+            if (!commentBody.includes(marker)) {
+              console.error('[ERROR] 评论内容中未找到标记符');
+              core.setFailed('评论内容格式错误: 缺少标记符');
+              return;
+            }
+
+            // 查找已有的 bot 评论
+            console.log('[INFO] 查找已有的 bot 评论...');
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            console.log(`[INFO] PR 共有 ${comments.length} 条评论`);
+
+            const existingComment = comments.find(c => c.body.includes(marker));
+
+            if (existingComment) {
+              // 更新已有评论
+              console.log(`[INFO] 找到已有评论 (ID: ${existingComment.id})`);
+              console.log('[INFO] 更新评论内容...');
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+                body: commentBody,
+              });
+              console.log('[OK] 评论已更新');
+            } else {
+              // 创建新评论
+              console.log('[INFO] 未找到已有评论，创建新评论...');
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: commentBody,
+              });
+              console.log('[OK] 新评论已创建');
+            }
+            console.log('============================================================');
+
+      # ============================================================
+      # 9. 上传测试报告 artifact
+      # ============================================================
+      - name: 上传测试报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backup-test-report
+          path: |
+            test-report.json
+            test-output.log
+            pr-comment.md
+          retention-days: 30
+
+      # ============================================================
+      # 10. 失败时导出容器日志
+      # ============================================================
+      - name: 失败时导出容器日志
+        if: failure()
+        run: |
+          echo "============================================================"
+          echo "  Step 10: 导出容器日志 (失败排查)"
+          echo "============================================================"
+
+          echo "[INFO] 导出 MySQL 容器日志..."
+          docker logs --tail 100 nh-mysql > mysql-container.log 2>&1 || echo "  [WARN] 无法获取 MySQL 日志"
+          echo "  日志大小: $(wc -c < mysql-container.log 2>/dev/null || echo 0) bytes"
+
+          echo "[INFO] 导出备份调度器容器日志..."
+          docker logs --tail 100 nh-backup-scheduler > scheduler-container.log 2>&1 || echo "  [WARN] 无法获取调度器日志"
+          echo "  日志大小: $(wc -c < scheduler-container.log 2>/dev/null || echo 0) bytes"
+
+          echo "[INFO] 导出 Cron 日志..."
+          docker exec nh-backup-scheduler cat /var/log/backup.log 2>/dev/null > cron-backup.log || echo "  [WARN] 无 Cron 备份日志"
+          docker exec nh-backup-scheduler cat /var/log/cron.log 2>/dev/null > cron-service.log || echo "  [WARN] 无 Cron 服务日志"
+
+          echo "[INFO] 导出容器内环境变量 (隐藏密码)..."
+          docker exec nh-backup-scheduler env 2>/dev/null | grep -v PASSWORD | sort > container-env.txt || echo "  [WARN] 无法获取环境变量"
+
+          echo "[INFO] 导出 Cron 任务列表..."
+          docker exec nh-backup-scheduler crontab -l 2>/dev/null > cron-tasks.txt || echo "  [WARN] 无法获取 Cron 任务列表"
+
+          echo ""
+          echo "[INFO] 所有容器状态:"
+          docker ps -a --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null
+          echo ""
+
+      - name: 上传容器日志 artifact
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backup-test-debug-logs
+          path: |
+            mysql-container.log
+            scheduler-container.log
+            cron-backup.log
+            cron-service.log
+            container-env.txt
+            cron-tasks.txt
+          retention-days: 7
+
+      # ============================================================
+      # 11. 设置 job 状态
+      # ============================================================
+      - name: 检查测试结果
+        if: always()
+        run: |
+          echo "============================================================"
+          echo "  Step 11: 检查测试结果 (通过率阈值 ${{ env.PASS_RATE_THRESHOLD }}%)"
+          echo "============================================================"
+
+          EXIT_CODE="${{ steps.parse.outputs.exit_code }}"
+          OVERALL="${{ steps.parse.outputs.overall_status }}"
+          PASS_RATE="${{ steps.parse.outputs.pass_rate }}"
+          THRESHOLD="${{ env.PASS_RATE_THRESHOLD }}"
+
+          if [ -z "$EXIT_CODE" ]; then
+            EXIT_CODE="unknown"
+            OVERALL="PARSE_FAILED"
+            PASS_RATE="0"
+          fi
+
+          echo "[INFO] 测试状态:   $OVERALL"
+          echo "[INFO] 退出码:     $EXIT_CODE"
+          echo "[INFO] 通过率:     ${PASS_RATE}%"
+          echo "[INFO] 阈值:       ${THRESHOLD}%"
+          echo "[INFO] 测试耗时:   ${{ steps.run-test.outputs.duration }}s"
+          echo "[INFO] PR 编号:    ${{ github.event.pull_request.number }}"
+          echo ""
+
+          # 使用 awk 进行浮点数比较
+          MEETS_THRESHOLD=$(awk "BEGIN { print ($PASS_RATE >= $THRESHOLD) ? 1 : 0 }")
+
+          if [ "$MEETS_THRESHOLD" -eq 1 ]; then
+            echo "::notice::备份恢复测试通过 (通过率 ${PASS_RATE}% ≥ 阈值 ${THRESHOLD}%)"
+            echo "[INFO] PR 门禁: 允许合并"
+            if [ "$EXIT_CODE" != "0" ]; then
+              echo "[WARN] 存在 ${{ steps.parse.outputs.overall_status }} 状态，但通过率达标，不阻断合并"
+            fi
+          else
+            echo "::error::备份恢复测试未通过 (通过率 ${PASS_RATE}% < 阈值 ${THRESHOLD}%)"
+            echo "::error::请查看 PR 评论中的失败详情"
+            echo "::error::或下载 artifact 'backup-test-debug-logs' 查看容器日志"
+            echo ""
+            echo "[INFO] 故障排查建议:"
+            echo "  1. 查看 PR 评论中的失败项详情"
+            echo "  2. 下载 artifact 'backup-test-report' 查看完整测试日志"
+            echo "  3. 下载 artifact 'backup-test-debug-logs' 查看容器日志"
+            echo "  4. 本地复现 (PowerShell): .\\deploy\\simulate-pr-comment.ps1 -SimulateFail"
+            echo "  5. 本地复现 (Bash):       docker exec nh-backup-scheduler bash -c 'source /tmp/backup-env.sh && bash /scripts/test-fault-recovery.sh'"
+            exit 1
+          fi
+          echo "============================================================"

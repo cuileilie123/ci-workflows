@@ -1,0 +1,163 @@
+#
+# ============================================================
+# 社区邻里有偿互助平台 - 备份调度器 (Docker Compose)
+# ============================================================
+#
+# 用法:
+#   # 启动备份调度器
+#   docker compose -f docker-compose.backup.yml up -d
+#
+#   # 手动执行一次备份
+#   docker compose -f docker-compose.backup.yml --profile executor run \
+#     backup-executor bash /scripts/backup.sh
+#
+#   # 查看备份状态
+#   docker compose -f docker-compose.backup.yml logs -f backup-scheduler
+#
+#   # 查看备份文件
+#   docker compose -f docker-compose.backup.yml exec backup-scheduler \
+#     ls -lh /backup/mysql/
+#
+#   # 恢复备份
+#   docker compose -f docker-compose.backup.yml run backup-executor \
+#     bash /scripts/restore.sh /backup/mysql/full_YYYYMMDD_HHMMSS.sql.gz
+#
+#   # 清理
+#   docker compose -f docker-compose.backup.yml down
+#
+# 架构:
+#   MySQL (主库) ──▶ Backup Scheduler (Cron) ──▶ COS (可选)
+#                        │
+#                        ▼
+#                  /backup/mysql (持久卷)
+#
+# 定时任务 (由 deploy/backup-init.sh 初始化):
+#   每日 03:00  - 全量备份 (backup.sh)
+#   每 6 小时   - 增量备份 (binlog-backup.sh)
+#   每周日 04:00 - 完整性验证 (verify-backup.sh)
+#   每月 1 号   - 清理旧备份 (cleanup-old-backups.sh)
+#
+# ============================================================
+
+services:
+  # ==================== 备份调度器 ====================
+  backup-scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.backup
+    image: nh-backup-scheduler:latest
+    container_name: nh-backup-scheduler
+    restart: unless-stopped
+    
+    # 挂载脚本目录（只读）和备份存储卷
+    volumes:
+      - ./scripts:/scripts:ro
+      - backup_data:/backup/mysql
+      - ./deploy/backup-init.sh:/usr/local/bin/backup-init.sh:ro
+    
+    # 环境变量
+    environment:
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_USER=root
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-root123}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-neighborhood_help}
+      - BACKUP_DIR=/backup/mysql
+      - TZ=Asia/Shanghai
+      # 腾讯云 COS（可选）
+      - COS_SECRET_ID=${COS_SECRET_ID:-}
+      - COS_SECRET_KEY=${COS_SECRET_KEY:-}
+      - COS_BUCKET=${COS_BUCKET:-neighborhood-help-1250000000}
+      - COS_REGION=${COS_REGION:-ap-guangzhou}
+    
+    # 启动入口：调用初始化脚本
+    entrypoint:
+      - bash
+      - /usr/local/bin/backup-init.sh
+    
+    # 健康检查
+    healthcheck:
+      test: ["CMD", "bash", "-c", "pgrep cron > /dev/null 2>&1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    
+    # 资源限制
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
+          cpus: '0.25'
+
+  # ==================== 备份执行器（手动触发） ====================
+  backup-executor:
+    image: nh-backup-scheduler:latest
+    container_name: nh-backup-executor
+    profiles: ["executor"]  # 仅在手动触发时启动
+    volumes:
+      - ./scripts:/scripts:ro
+      - backup_data:/backup/mysql
+    environment:
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_USER=root
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-root123}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-neighborhood_help}
+      - TZ=Asia/Shanghai
+      - COS_SECRET_ID=${COS_SECRET_ID:-}
+      - COS_SECRET_KEY=${COS_SECRET_KEY:-}
+      - COS_BUCKET=${COS_BUCKET:-neighborhood-help-1250000000}
+      - COS_REGION=${COS_REGION:-ap-guangzhou}
+    # 进入容器后执行 bash 手动运行脚本
+    # 使用方式：
+    #   docker compose -f docker-compose.backup.yml --profile executor run \
+    #     backup-executor bash /scripts/backup.sh
+    #   docker compose -f docker-compose.backup.yml --profile executor run \
+    #     backup-executor bash /scripts/restore.sh /backup/mysql/full_XXX.sql.gz
+    #   docker compose -f docker-compose.backup.yml --profile executor run \
+    #     backup-executor bash /scripts/verify-backup.sh
+    #   docker compose -f docker-compose.backup.yml --profile executor run \
+    #     backup-executor bash /scripts/test-backup-restore.sh
+
+  # ==================== 备份查看器（只读） ====================
+  backup-viewer:
+    image: alpine:latest
+    container_name: nh-backup-viewer
+    profiles: ["viewer"]
+    volumes:
+      - backup_data:/backup/mysql:ro
+    command: ["tail", "-f", "/dev/null"]  # 保持容器运行
+    # 使用方式：
+    #   docker compose -f docker-compose.backup.yml --profile viewer up -d
+    #   docker compose -f docker-compose.backup.yml exec backup-viewer ls -lh /backup/mysql/
+    #   docker compose -f docker-compose.backup.yml exec backup-viewer cat /backup/mysql/backup_log.csv
+
+# ==================== 持久化存储 ====================
+volumes:
+  backup_data:
+    name: nh-backup-data
+    driver: local
+    # 如需绑定到宿主机特定路径，取消以下注释：
+    # driver_opts:
+    #   type: none
+    #   o: bind
+    #   device: /data/backup/mysql
+
+# ==================== 网络配置 ====================
+# 重要：备份调度器需要连接到 MySQL 所在的 Docker 网络
+#
+# 方式一（推荐）：使用主 docker-compose 一起启动
+#   docker compose -f docker-compose.yml -f docker-compose.backup.yml up -d backup-scheduler
+#
+# 方式二：单独启动（需先查找 MySQL 网络名并在下方配置）
+#   1. 查找网络名: docker network ls | grep neighborhood
+#   2. 取消下方 external 网络注释，将 <network_name> 替换为实际网络名
+#
+# networks:
+#   nh-network:
+#     external: true
+#     name: <network_name>

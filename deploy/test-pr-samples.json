@@ -1,0 +1,179 @@
+{
+  "samples": [
+    {
+      "name": "全部通过",
+      "description": "37 项测试全部通过的场景",
+      "report": {
+        "overall_status": "PASS",
+        "exit_code": 0,
+        "timestamp": "2026-08-01T10:30:00+08:00",
+        "duration_sec": 270.0,
+        "test_name": "故障排查场景自动化测试",
+        "database": "neighborhood_help@mysql",
+        "summary": {
+          "total_cases": 10,
+          "total_items": 37,
+          "pass": 37,
+          "fail": 0,
+          "warn": 0,
+          "pass_rate": 100.0
+        },
+        "failed_cases": [],
+        "cases": [
+          { "tc_id": "TC-01", "title": "Cron 进程状态验证", "status": "PASS", "pass": 5, "fail": 0, "warn": 0, "items": [
+            { "message": "cron 进程运行中 (PID 1)", "status": "PASS" },
+            { "message": "cron -f 启动命令正确", "status": "PASS" },
+            { "message": "/etc/cron.d/backup-cron 文件存在", "status": "PASS" },
+            { "message": "文件权限为 644", "status": "PASS" },
+            { "message": "Cron 任务数量为 4", "status": "PASS" }
+          ]},
+          { "tc_id": "TC-02", "title": "环境变量文件丢失后恢复", "status": "PASS", "pass": 4, "fail": 0, "warn": 0, "items": [
+            { "message": "删除前备份正常执行", "status": "PASS" },
+            { "message": "删除后备份正确降级", "status": "PASS" },
+            { "message": "恢复后备份立即正常", "status": "PASS" },
+            { "message": "环境变量值正确还原", "status": "PASS" }
+          ]},
+          { "tc_id": "TC-03", "title": "Cron 配置文件格式错误检测", "status": "PASS", "pass": 4, "fail": 0, "warn": 0, "items": [
+            { "message": "检测到缺少 root 字段", "status": "PASS" },
+            { "message": "检测到无效分钟数", "status": "PASS" },
+            { "message": "恢复正常后任务执行正确", "status": "PASS" },
+            { "message": "日志记录格式错误", "status": "PASS" }
+          ]},
+          { "tc_id": "TC-04", "title": "MySQL 不可达时备份降级", "status": "PASS", "pass": 4, "fail": 0, "warn": 0, "items": [
+            { "message": "无效主机时备份正确失败", "status": "PASS" },
+            { "message": "错误日志包含连接信息", "status": "PASS" },
+            { "message": "恢复后备份正常", "status": "PASS" },
+            { "message": "退出码为 1", "status": "PASS" }
+          ]},
+          { "tc_id": "TC-05", "title": "备份文件损坏检测", "status": "PASS", "pass": 3, "fail": 0, "warn": 0, "items": [
+            { "message": "verify-backup.sh 检测到随机数据损坏", "status": "PASS" },
+            { "message": "检测到 footer 缺失", "status": "PASS" },
+            { "message": "清理后恢复正常", "status": "PASS" }
+          ]},
+          { "tc_id": "TC-06", "title": "COS 未配置时优雅降级", "status": "PASS", "pass": 3, "fail": 0, "warn": 0, "items": [
+            { "message": "提示 coscmd 未配置", "status": "PASS" },
+            { "message": "本地备份仍成功", "status": "PASS" },
+            { "message": "退出码为 0", "status": "PASS" }
+          ]},
+          { "tc_id": "TC-07", "title": "损坏备份文件恢复被拦截", "status": "PASS", "pass": 4, "fail": 0, "warn": 0, "items": [
+            { "message": "header 校验拦截损坏文件", "status": "PASS" },
+            { "message": "退出码非零", "status": "PASS" },
+            { "message": "恢复前创建快照", "status": "PASS" },
+            { "message": "错误信息清晰", "status": "PASS" }
+          ]},
+          { "tc_id": "TC-08", "title": "backup-init.sh 批量校验逻辑", "status": "PASS", "pass": 3, "fail": 0, "warn": 0, "items": [
+            { "message": "新增 2 个损坏文件被检测", "status": "PASS" },
+            { "message": "有效/可疑数量正确", "status": "PASS" },
+            { "message": "清理后恢复正常", "status": "PASS" }
+          ]},
+          { "tc_id": "TC-09", "title": "Cron 任务实际触发验证", "status": "PASS", "pass": 3, "fail": 0, "warn": 0, "items": [
+            { "message": "Cron 任务在 24s 内成功触发", "status": "PASS", "timing": "24s" },
+            { "message": "环境变量正确加载", "status": "PASS" },
+            { "message": "备份文件生成成功", "status": "PASS" }
+          ]},
+          { "tc_id": "TC-10", "title": "Header + Footer 双校验完整性", "status": "PASS", "pass": 5, "fail": 0, "warn": 0, "items": [
+            { "message": "backup.sh header 校验正确", "status": "PASS" },
+            { "message": "verify-backup.sh header 校验正确", "status": "PASS" },
+            { "message": "restore.sh header 校验正确", "status": "PASS" },
+            { "message": "兼容 MySQL 和 MariaDB dump", "status": "PASS" },
+            { "message": "backup-init.sh 启动验证通过", "status": "PASS" }
+          ]}
+        ]
+      }
+    },
+    {
+      "name": "部分失败",
+      "description": "2 项失败 + 1 项警告的场景 (用于验证失败评论格式)",
+      "report": {
+        "overall_status": "FAIL",
+        "exit_code": 1,
+        "timestamp": "2026-08-01T11:00:00+08:00",
+        "duration_sec": 285.0,
+        "test_name": "故障排查场景自动化测试",
+        "database": "neighborhood_help@mysql",
+        "summary": {
+          "total_cases": 10,
+          "total_items": 37,
+          "pass": 35,
+          "fail": 2,
+          "warn": 1,
+          "pass_rate": 94.6
+        },
+        "failed_cases": [
+          {
+            "tc_id": "TC-05",
+            "title": "备份文件损坏检测",
+            "failed_items": [
+              { "message": "verify-backup.sh 未能检测到损坏的备份文件" }
+            ]
+          },
+          {
+            "tc_id": "TC-09",
+            "title": "Cron 任务实际触发验证",
+            "failed_items": [
+              { "message": "Cron 任务在 75s 内未触发" }
+            ]
+          }
+        ],
+        "cases": [
+          { "tc_id": "TC-01", "title": "Cron 进程状态验证", "status": "PASS", "pass": 5, "fail": 0, "warn": 0, "items": [] },
+          { "tc_id": "TC-02", "title": "环境变量文件丢失后恢复", "status": "PASS", "pass": 4, "fail": 0, "warn": 0, "items": [] },
+          { "tc_id": "TC-03", "title": "Cron 配置文件格式错误检测", "status": "PASS", "pass": 4, "fail": 0, "warn": 0, "items": [] },
+          { "tc_id": "TC-04", "title": "MySQL 不可达时备份降级", "status": "PASS", "pass": 4, "fail": 0, "warn": 0, "items": [] },
+          { "tc_id": "TC-05", "title": "备份文件损坏检测", "status": "FAIL", "pass": 2, "fail": 1, "warn": 0, "items": [] },
+          { "tc_id": "TC-06", "title": "COS 未配置时优雅降级", "status": "PASS", "pass": 3, "fail": 0, "warn": 0, "items": [] },
+          { "tc_id": "TC-07", "title": "损坏备份文件恢复被拦截", "status": "PASS", "pass": 4, "fail": 0, "warn": 0, "items": [] },
+          { "tc_id": "TC-08", "title": "backup-init.sh 批量校验逻辑", "status": "WARN", "pass": 2, "fail": 0, "warn": 1, "items": [] },
+          { "tc_id": "TC-09", "title": "Cron 任务实际触发验证", "status": "FAIL", "pass": 2, "fail": 1, "warn": 0, "items": [
+            { "message": "Cron 任务在 24s 内成功触发", "status": "PASS", "timing": "24s" }
+          ]},
+          { "tc_id": "TC-10", "title": "Header + Footer 双校验完整性", "status": "PASS", "pass": 5, "fail": 0, "warn": 0, "items": [] }
+        ]
+      }
+    },
+    {
+      "name": "全部失败",
+      "description": "所有测试项均失败的场景 (用于验证极端情况)",
+      "report": {
+        "overall_status": "FAIL",
+        "exit_code": 1,
+        "timestamp": "2026-08-01T12:00:00+08:00",
+        "duration_sec": 30.0,
+        "test_name": "故障排查场景自动化测试",
+        "database": "N/A",
+        "summary": {
+          "total_cases": 10,
+          "total_items": 37,
+          "pass": 0,
+          "fail": 37,
+          "warn": 0,
+          "pass_rate": 0.0
+        },
+        "failed_cases": [
+          { "tc_id": "TC-01", "title": "Cron 进程状态验证", "failed_items": [{ "message": "cron 进程未运行" }] },
+          { "tc_id": "TC-02", "title": "环境变量文件丢失后恢复", "failed_items": [{ "message": "环境变量文件无法恢复" }] },
+          { "tc_id": "TC-03", "title": "Cron 配置文件格式错误检测", "failed_items": [{ "message": "无法检测格式错误" }] },
+          { "tc_id": "TC-04", "title": "MySQL 不可达时备份降级", "failed_items": [{ "message": "MySQL 连接超时未降级" }] },
+          { "tc_id": "TC-05", "title": "备份文件损坏检测", "failed_items": [{ "message": "损坏文件未被检测" }] },
+          { "tc_id": "TC-06", "title": "COS 未配置时优雅降级", "failed_items": [{ "message": "COS 未配置时崩溃" }] },
+          { "tc_id": "TC-07", "title": "损坏备份文件恢复被拦截", "failed_items": [{ "message": "损坏文件被恢复" }] },
+          { "tc_id": "TC-08", "title": "backup-init.sh 批量校验逻辑", "failed_items": [{ "message": "批量校验逻辑失败" }] },
+          { "tc_id": "TC-09", "title": "Cron 任务实际触发验证", "failed_items": [{ "message": "Cron 任务完全未触发" }] },
+          { "tc_id": "TC-10", "title": "Header + Footer 双校验完整性", "failed_items": [{ "message": "双校验逻辑未生效" }] }
+        ],
+        "cases": [
+          { "tc_id": "TC-01", "title": "Cron 进程状态验证", "status": "FAIL", "pass": 0, "fail": 5, "warn": 0, "items": [] },
+          { "tc_id": "TC-02", "title": "环境变量文件丢失后恢复", "status": "FAIL", "pass": 0, "fail": 4, "warn": 0, "items": [] },
+          { "tc_id": "TC-03", "title": "Cron 配置文件格式错误检测", "status": "FAIL", "pass": 0, "fail": 4, "warn": 0, "items": [] },
+          { "tc_id": "TC-04", "title": "MySQL 不可达时备份降级", "status": "FAIL", "pass": 0, "fail": 4, "warn": 0, "items": [] },
+          { "tc_id": "TC-05", "title": "备份文件损坏检测", "status": "FAIL", "pass": 0, "fail": 3, "warn": 0, "items": [] },
+          { "tc_id": "TC-06", "title": "COS 未配置时优雅降级", "status": "FAIL", "pass": 0, "fail": 3, "warn": 0, "items": [] },
+          { "tc_id": "TC-07", "title": "损坏备份文件恢复被拦截", "status": "FAIL", "pass": 0, "fail": 4, "warn": 0, "items": [] },
+          { "tc_id": "TC-08", "title": "backup-init.sh 批量校验逻辑", "status": "FAIL", "pass": 0, "fail": 3, "warn": 0, "items": [] },
+          { "tc_id": "TC-09", "title": "Cron 任务实际触发验证", "status": "FAIL", "pass": 0, "fail": 3, "warn": 0, "items": [] },
+          { "tc_id": "TC-10", "title": "Header + Footer 双校验完整性", "status": "FAIL", "pass": 0, "fail": 5, "warn": 0, "items": [] }
+        ]
+      }
+    }
+  ]
+}

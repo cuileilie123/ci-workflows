@@ -1,0 +1,57 @@
+# ============================================================
+# 社区邻里有偿互助平台 - 备份调度器镜像
+# ============================================================
+#
+# 构建:
+#   docker build -t nh-backup-scheduler:latest -f Dockerfile.backup .
+#
+# 推送 (可选):
+#   docker tag nh-backup-scheduler:latest <registry>/nh-backup-scheduler:latest
+#   docker push <registry>/nh-backup-scheduler:latest
+#
+# ============================================================
+
+FROM debian:bookworm-slim
+
+LABEL maintainer="neighborhood-help"
+LABEL description="社区邻里有偿互助平台 - 备份调度器"
+LABEL version="1.0.0"
+
+# 避免交互式提示
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 安装所需包
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        default-mysql-client \
+        cron \
+        procps \
+        gzip \
+        python3-pip \
+        ca-certificates && \
+    pip3 install --break-system-packages coscmd && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# 创建备份目录
+RUN mkdir -p /backup/mysql /var/log
+
+# 创建非 root 用户运行 cron（可选，当前仍用 root）
+# RUN groupadd -r backup && useradd -r -g backup backup
+
+# 默认环境变量
+ENV MYSQL_HOST=mysql \
+    MYSQL_PORT=3306 \
+    MYSQL_USER=root \
+    MYSQL_PASSWORD=root123 \
+    MYSQL_DATABASE=neighborhood_help \
+    BACKUP_DIR=/backup/mysql \
+    TZ=Asia/Shanghai
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD pgrep cron > /dev/null 2>&1 || exit 1
+
+# 入口: 启动 cron 守护进程
+# 使用方式: docker run -d -v ./scripts:/scripts:ro -v backup_data:/backup/mysql nh-backup-scheduler
+CMD ["cron", "-f"]

@@ -1,0 +1,154 @@
+export_time: '2026-07-31T23:50:21.4505718+08:00'
+export_mode: simulate_fail
+test_duration: 285
+comment_markdown: |-
+  <!-- backup-test-pr-comment -->
+
+  ## ❌ 故障排查场景自动化测试 — 存在失败
+
+  | 指标 | 值 |
+  |------|-----|
+  | 状态 | **FAIL** |
+  | 测试项 | 37 |
+  | 通过 | 35 |
+  | 失败 | 2 |
+  | 警告 | 1 |
+  | 通过率 | 94.6% |
+  | 耗时 | 285s |
+  | 数据库 | `neighborhood_help@mysql` |
+  | 时间 | 2026-07-31T23:10:00+08:00 |
+
+  ### 🔴 失败项详情
+
+  **TC-05: 备份文件损坏检测**
+
+  - ❌ verify-backup.sh 未能检测到损坏的备份文件
+
+  **TC-09: Cron 任务实际触发验证**
+
+  - ❌ Cron 任务在 75s 内未触发
+
+  ### 📋 各场景结果
+
+  | 场景 | 描述 | 状态 | 通过 | 失败 | 警告 |
+  |------|------|------|------|------|------|
+  | TC-01 | Cron 进程状态验证 | ✅ PASS | 5 | 0 | 0 |
+  | TC-02 | 环境变量文件丢失后恢复 | ✅ PASS | 4 | 0 | 0 |
+  | TC-03 | Cron 配置文件格式错误检测 | ✅ PASS | 3 | 0 | 0 |
+  | TC-04 | MySQL 不可达时备份降级 | ✅ PASS | 4 | 0 | 0 |
+  | TC-05 | 备份文件损坏检测 | ❌ FAIL | 2 | 1 | 0 |
+  | TC-06 | COS 未配置时优雅降级 | ✅ PASS | 3 | 0 | 0 |
+  | TC-07 | 损坏备份文件恢复被拦截 | ✅ PASS | 4 | 0 | 0 |
+  | TC-08 | backup-init.sh 批量校验逻辑 | ⚠️ WARN | 2 | 0 | 1 |
+  | TC-09 | Cron 任务实际触发验证 | ❌ FAIL | 2 | 1 | 0 |
+  | TC-10 | Header + Footer 双校验完整性 | ✅ PASS | 5 | 0 | 0 |
+
+  ### ⏱️ 耗时数据
+
+  | 场景 | 测试项 | 耗时 |
+  |------|--------|------|
+  | TC-09 | Cron 任务在 24s 内成功触发 | `24s` |
+
+  ---
+  📁 详细报告: [test-report.json]  |  🤖 由 GitHub Actions 自动生成  |  🔄 每次推送自动更新
+report:
+  test_name: 故障排查场景自动化测试
+  overall_status: FAIL
+  exit_code: 1
+  timestamp: '2026-07-31T23:10:00+08:00'
+  executed_at: 2026-07-31 23:10:00 CST
+  database: neighborhood_help@mysql
+  duration_sec: 285.0
+  summary:
+    total_cases: 10
+    total_items: 37
+    pass: 35
+    fail: 2
+    warn: 1
+    pass_rate: 94.6
+  failed_cases:
+  - tc_id: TC-05
+    title: 备份文件损坏检测
+    failed_items:
+    - message: verify-backup.sh 未能检测到损坏的备份文件
+  - tc_id: TC-09
+    title: Cron 任务实际触发验证
+    failed_items:
+    - message: Cron 任务在 75s 内未触发
+  cases:
+  - tc_id: TC-01
+    title: Cron 进程状态验证
+    status: PASS
+    pass: 5
+    fail: 0
+    warn: 0
+    items: []
+  - tc_id: TC-02
+    title: 环境变量文件丢失后恢复
+    status: PASS
+    pass: 4
+    fail: 0
+    warn: 0
+    items: []
+  - tc_id: TC-03
+    title: Cron 配置文件格式错误检测
+    status: PASS
+    pass: 3
+    fail: 0
+    warn: 0
+    items: []
+  - tc_id: TC-04
+    title: MySQL 不可达时备份降级
+    status: PASS
+    pass: 4
+    fail: 0
+    warn: 0
+    items: []
+  - tc_id: TC-05
+    title: 备份文件损坏检测
+    status: FAIL
+    pass: 2
+    fail: 1
+    warn: 0
+    items: []
+  - tc_id: TC-06
+    title: COS 未配置时优雅降级
+    status: PASS
+    pass: 3
+    fail: 0
+    warn: 0
+    items: []
+  - tc_id: TC-07
+    title: 损坏备份文件恢复被拦截
+    status: PASS
+    pass: 4
+    fail: 0
+    warn: 0
+    items: []
+  - tc_id: TC-08
+    title: backup-init.sh 批量校验逻辑
+    status: WARN
+    pass: 2
+    fail: 0
+    warn: 1
+    items: []
+  - tc_id: TC-09
+    title: Cron 任务实际触发验证
+    status: FAIL
+    pass: 2
+    fail: 1
+    warn: 0
+    items:
+    - status: PASS
+      message: Cron 任务在 24s 内成功触发
+      timing: 24s
+    - status: FAIL
+      message: Cron 任务在 75s 内未触发
+      timing: null
+  - tc_id: TC-10
+    title: Header + Footer 双校验完整性
+    status: PASS
+    pass: 5
+    fail: 0
+    warn: 0
+    items: []
