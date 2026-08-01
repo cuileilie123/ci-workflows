@@ -18,7 +18,7 @@
 |------|-----|
 | Token name | `ci-workflows-push` |
 | Expiration | 90 days（推荐） |
-| Resource owner | `cuileilei123` |
+| Resource owner | `cuileilie123` |
 | Repository access | 选择 "Only select repositories" → 勾选 `ci-workflows` |
 
 ### 4. 配置权限
@@ -71,18 +71,18 @@ git config --global credential.helper 'cache --timeout=3600'
 
 # 推送时输入用户名和 Token
 git push -u origin main
-# Username: cuileilei123
+# Username: cuileilie123
 # Password: ghp_xxxxxxxxxxxx（粘贴 Token）
 ```
 
 #### 方式 C：直接写入 Remote URL（不推荐，仅临时使用）
 
 ```powershell
-git remote set-url origin https://cuileilei123:ghp_xxxxxxxxxxxx@github.com/cuileilei123/ci-workflows.git
+git remote set-url origin https://cuileilie123:ghp_xxxxxxxxxxxx@github.com/cuileilie123/ci-workflows.git
 git push -u origin main
 
 # 推送完成后恢复原始 URL
-git remote set-url origin https://github.com/cuileilei123/ci-workflows.git
+git remote set-url origin https://github.com/cuileilie123/ci-workflows.git
 ```
 
 ## 二、Classic Token 方式（备选）
@@ -109,7 +109,7 @@ cd d:\neighborhood-help
 
 # 确认远程地址
 git remote -v
-# origin  https://github.com/cuileilei123/ci-workflows.git
+# origin  https://github.com/cuileilie123/ci-workflows.git
 
 # 推送
 git push -u origin main
