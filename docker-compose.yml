@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   mysql:
     image: mysql:8.0
@@ -12,6 +10,8 @@ services:
       - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
+      - ./scripts:/scripts
+      - backup_data:/backup
     command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
 
   redis:
@@ -61,3 +61,4 @@ volumes:
   redis_data:
   es_data:
   mongo_data:
+  backup_data:
