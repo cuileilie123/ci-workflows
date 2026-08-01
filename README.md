@@ -84,10 +84,18 @@ neighborhood-help/
 │   ├── grafana-dashboard.json
 │   └── filebeat.yml
 │
-├── scripts/                  # 运维脚本
-│   ├── backup.sh
-│   ├── restore.sh
-│   └── disaster-recovery.sh
+├── scripts/                  # 运维脚本（已通过 18 项自动化测试 ✅）
+│   ├── backup.sh             #   全量备份（mysqldump + gzip + COS 上传）
+│   ├── restore.sh            #   恢复脚本（自动快照 + 完整性校验）
+│   ├── binlog-backup.sh      #   增量备份（Binlog flush + 文件复制）
+│   ├── verify-backup.sh      #   备份完整性验证（Dump completed 检查）
+│   ├── cleanup-old-backups.sh #  30 天自动清理（本地 + COS）
+│   ├── disaster-recovery.sh  #   灾备演练（主库故障注入 + 数据一致性校验）
+│   └── test-backup-restore.sh #  自动化测试脚本（18 项用例）
+│
+├── deploy/
+│   └── cron/
+│       └── backup-cron       #   Cron 定时任务（全量/增量/验证/清理）
 │
 ├── docker-compose.yml       # 一键拉起所有基础设施
 ├── .env.example            # 环境变量模板
@@ -196,6 +204,136 @@ Phase 5 - 运营+工程化（Day 6-7）
 | CI/CD | #71-74, #87-90, #99-100 | backend/14 | 10 |
 | 数据管理 | #51, #53, #58-59, #69-70, #95-96, #98 | bff/prisma, backend/15 | 10 |
 | **合计** | **全部 100 条** | **20 个 Prompt** | **100 ✅** |
+
+---
+
+## 💾 备份与恢复
+
+### 架构概览
+
+```
+┌─────────────────────────────────────────────────┐
+│                Docker Compose                    │
+│                                                   │
+│  ┌──────────┐    ┌──────────┐    ┌──────────┐   │
+│  │  MySQL   │────│  Backup  │────│   COS    │   │
+│  │ (主库)   │    │ (Cron)   │    │ (云存储) │   │
+│  └──────────┘    └──────────┘    └──────────┘   │
+│       │               │               │          │
+│       │   /scripts/   │  backups/    │          │
+│       │   ─────────   │  mysql/     │          │
+│       │   backup.sh   │  full_*.gz  │          │
+│       │   restore.sh  │             │          │
+│       │   verify.sh   │             │          │
+│       │   cleanup.sh  │             │          │
+│       │               │             │          │
+│  ┌──────────┐                        │          │
+│  │ Binlog   │────────────────────────│          │
+│  │ (增量)   │    binlog-backup.sh    │          │
+│  └──────────┘                        │          │
+└─────────────────────────────────────────────────┘
+```
+
+### 快速上手
+
+```bash
+# 1. 启动基础设施
+docker-compose up -d
+
+# 2. 手动执行一次全量备份
+docker exec nh-mysql bash /scripts/backup.sh
+
+# 3. 查看备份文件
+docker exec nh-mysql ls -lh /backup/mysql/
+
+# 4. 恢复数据库（交互式，需输入 yes 确认）
+docker exec nh-mysql bash /scripts/restore.sh /backup/mysql/full_20260731_064041.sql.gz
+
+# 5. 验证恢复结果
+docker exec nh-mysql bash /scripts/verify-backup.sh
+```
+
+### 备份策略
+
+| 类型 | 频率 | 保留 | 脚本 |
+|------|------|------|------|
+| 全量备份 | 每日 03:00 | 30 天 | `backup.sh` |
+| 增量备份 (Binlog) | 每 6 小时 | 30 天 | `binlog-backup.sh` |
+| 完整性验证 | 每周日 04:00 | - | `verify-backup.sh` |
+| 旧备份清理 | 每月 1 号 05:00 | - | `cleanup-old-backups.sh` |
+
+### 备份文件规范
+
+- **格式**：`mysqldump` + `gzip`（单文件，包含 `CREATE DATABASE` / `USE` / `DROP TABLE` / `CREATE TABLE` / `INSERT`）
+- **范围**：仅业务库 `neighborhood_help`（排除 mysql/sys 等系统库）
+- **编码**：`utf8mb4`（全量中文支持）
+- **一致性**：`--single-transaction`（InnoDB 快照，不锁表）
+- **文件命名**：`full_YYYYMMDD_HHMMSS.sql.gz`
+- **大小**：约 3-5 KB（业务数据量较小时）
+
+### Cron 定时任务
+
+配置文件：[`deploy/cron/backup-cron`](file:///d:/neighborhood-help/deploy/cron/backup-cron)
+
+```cron
+# 每日 03:00 全量备份
+0 3 * * * /scripts/backup.sh
+
+# 每 6 小时增量备份
+0 */6 * * * /scripts/binlog-backup.sh
+
+# 每周日 04:00 验证备份
+0 4 * * 0 /scripts/verify-backup.sh
+
+# 每月 1 号 05:00 清理旧备份
+0 5 1 * * /scripts/cleanup-old-backups.sh
+```
+
+### 自动化测试
+
+运行全流程验证（18 项测试用例，通过率 100%）：
+
+```bash
+# 在 MySQL 容器中执行
+docker exec nh-mysql bash /scripts/test-backup-restore.sh
+```
+
+测试覆盖：
+1. **数据准备**：插入 users/wallets/tasks 三表关联数据
+2. **特征记录**：记录备份前行数 + 字段校验和
+3. **执行备份**：验证 `backup.sh` 成功
+4. **文件验证**：文件存在、大小>0、完整性、格式、内容、日志
+5. **模拟丢失**：删除测试数据
+6. **执行恢复**：验证 `restore.sh` 成功
+7. **一致性校验**：三表行数 + 三条记录字段完全一致
+8. **清理数据**：按依赖顺序清理
+
+### 灾备演练
+
+```bash
+docker exec nh-mysql bash /scripts/disaster-recovery.sh
+```
+
+演练流程：
+1. 模拟主库故障（kill MySQL 容器）
+2. 验证 API 降级能力
+3. 数据一致性校验
+4. 恢复服务
+
+### 环境变量
+
+```bash
+# MySQL 连接
+MYSQL_HOST=mysql
+MYSQL_USER=root
+MYSQL_PASSWORD=root123
+MYSQL_DATABASE=neighborhood_help
+
+# 腾讯云 COS（可选，用于云端备份）
+COS_SECRET_ID=your_cos_secret_id
+COS_SECRET_KEY=your_cos_secret_key
+COS_BUCKET=neighborhood-help-1250000000
+```
 
 ---
 
