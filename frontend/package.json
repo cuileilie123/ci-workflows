@@ -27,7 +27,6 @@
     "@dcloudio/vite-plugin-uni": "3.0.0-5010520260709002",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
     "@typescript-eslint/parser": "^7.18.0",
-    "@vue/tsconfig": "^0.1.3",
     "@vue/runtime-core": "^3.4.21",
     "eslint": "^8.57.0",
     "eslint-config-prettier": "^9.1.0",

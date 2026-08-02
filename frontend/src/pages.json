@@ -5,6 +5,12 @@
       "style": {
         "navigationBarTitleText": "邻里互助"
       }
+    },
+    {
+      "path": "pages/auth/login",
+      "style": {
+        "navigationBarTitleText": "登录"
+      }
     }
   ],
   "globalStyle": {

@@ -1,16 +1,33 @@
 /** 用户角色 */
 export type UserRole = 'USER' | 'HELPER' | 'ADMIN';
 
-/** 用户信息 */
+/** 用户状态 */
+export type UserStatus = 'ACTIVE' | 'BANNED' | 'DELETED';
+
+/** 微信授权用户信息（chooseAvatar / nickname 输入框获取） */
+export interface WxUserInfo {
+  nickname?: string;
+  avatarUrl?: string;
+}
+
+/** 登录用户信息（与 BFF UserInfoPayload 对齐） */
 export interface User {
-  id: number;
+  id: string;
   openid: string;
   nickname: string;
-  avatar: string;
-  phone: string;
+  avatar: string | null;
+  phone: string | null;
   creditScore: number;
   role: UserRole;
-  createdAt: string;
+  status: UserStatus;
+}
+
+/** 登录 / 刷新响应（与 BFF LoginResult 对齐） */
+export interface LoginResponse {
+  accessToken: string;
+  refreshToken: string;
+  expiresIn: number;
+  user: User;
 }
 
 /** 任务状态 */

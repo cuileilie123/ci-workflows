@@ -5,6 +5,23 @@
       <text class="subtitle">社区有偿互助平台</text>
     </view>
 
+    <view v-if="userStore.isLoggedIn" class="card user-card">
+      <image
+        v-if="userStore.avatar"
+        class="user-avatar"
+        :src="userStore.avatar"
+        mode="aspectFill"
+      />
+      <view v-else class="user-avatar placeholder">
+        <text class="placeholder-text">{{ userStore.nickname.slice(0, 1) || '邻' }}</text>
+      </view>
+      <view class="user-info">
+        <text class="user-name">{{ userStore.nickname }}</text>
+        <text class="user-meta">信用分：{{ userStore.userInfo?.creditScore ?? 100 }}</text>
+      </view>
+      <button class="logout-btn" size="mini" @click="onLogout">退出</button>
+    </view>
+
     <view class="card">
       <text class="card-title">快速开始</text>
       <view class="feature-list">
@@ -21,7 +38,14 @@
 </template>
 
 <script setup lang="ts">
-// 首页 - 后续接入任务列表
+import { useUserStore } from '@/store/user';
+
+const userStore = useUserStore();
+
+async function onLogout(): Promise<void> {
+  await userStore.logout();
+  uni.reLaunch({ url: '/pages/auth/login' });
+}
 </script>
 
 <style lang="scss" scoped>
@@ -56,6 +80,61 @@
   padding: 32rpx;
   margin-top: 40rpx;
   box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.08);
+}
+
+.user-card {
+  display: flex;
+  align-items: center;
+}
+
+.user-avatar {
+  width: 88rpx;
+  height: 88rpx;
+  border-radius: 50%;
+  flex-shrink: 0;
+
+  &.placeholder {
+    background-color: #4caf50;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+}
+
+.placeholder-text {
+  color: #fff;
+  font-size: 36rpx;
+  font-weight: bold;
+}
+
+.user-info {
+  flex: 1;
+  margin-left: 24rpx;
+  display: flex;
+  flex-direction: column;
+}
+
+.user-name {
+  font-size: 32rpx;
+  font-weight: bold;
+  color: #333;
+}
+
+.user-meta {
+  font-size: 24rpx;
+  color: #888;
+  margin-top: 8rpx;
+}
+
+.logout-btn {
+  flex-shrink: 0;
+  background-color: #f5f5f5;
+  color: #666;
+  font-size: 24rpx;
+
+  &::after {
+    border: none;
+  }
 }
 
 .card-title {
