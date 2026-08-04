@@ -1,11 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsNotEmpty,
-  IsObject,
-  IsOptional,
-  IsString,
-  MaxLength,
-} from 'class-validator';
+import { IsNotEmpty, IsObject, IsOptional, IsString, MaxLength } from 'class-validator';
 
 /** 微信授权用户信息（前端 chooseAvatar + nickname 输入） */
 export interface WxUserInfo {
@@ -15,7 +9,10 @@ export interface WxUserInfo {
 }
 
 export class WxLoginDto {
-  @ApiProperty({ description: 'wx.login() 返回的临时 code（5 分钟有效）', example: '0a3xxxxxxxxxxxxx' })
+  @ApiProperty({
+    description: 'wx.login() 返回的临时 code（5 分钟有效）',
+    example: '0a3xxxxxxxxxxxxx',
+  })
   @IsString()
   @IsNotEmpty({ message: 'code 不能为空' })
   code!: string;

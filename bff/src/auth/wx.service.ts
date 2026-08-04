@@ -77,9 +77,7 @@ export class WxService {
         // 业务错误（code 失效等）直接抛出，不重试
         if (err instanceof BadRequestException) throw err;
         lastError = err;
-        this.logger.warn(
-          `code2Session 第 ${attempt} 次失败: ${(err as Error).message}`,
-        );
+        this.logger.warn(`code2Session 第 ${attempt} 次失败: ${(err as Error).message}`);
         if (attempt < 3) {
           await sleep(Math.pow(2, attempt) * 300); // 0.6s, 1.2s 指数退避
         }

@@ -8,8 +8,9 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { WxService } from './wx.service';
-import { SensitiveService } from './sensitive.service';
+import { SensitiveService } from '../common/sensitive.service';
 import { TokenBlacklistService } from '../common/token-blacklist.service';
+import { WalletService } from '../modules/wallet/wallet.service';
 import type { RefreshDto, WxLoginDto } from './dto/wx-login.dto';
 
 const ACCESS_TTL_SEC = 2 * 60 * 60; // 2h
@@ -56,6 +57,7 @@ export class AuthService {
     private readonly config: ConfigService,
     private readonly sensitive: SensitiveService,
     private readonly blacklist: TokenBlacklistService,
+    private readonly walletService: WalletService,
   ) {
     // Refresh Token 使用独立密钥；未配置时回退到 JWT_SECRET
     this.refreshSecret =
@@ -83,6 +85,8 @@ export class AuthService {
       user = await this.prisma.user.create({
         data: { openid, nickname, avatar },
       });
+      // 4. 新用户自动初始化钱包（余额 0）
+      await this.walletService.initWallet(user.id);
     } else {
       user = await this.prisma.user.update({
         where: { id: user.id },

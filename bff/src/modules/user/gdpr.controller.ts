@@ -1,25 +1,28 @@
-import {
-  Controller,
-  Get,
-  Delete,
-  UseGuards,
-  Req,
-  Res,
-} from '@nestjs/common';
+import { Controller, Get, Delete, UseGuards, Req, Res } from '@nestjs/common';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { PrismaService } from '../../prisma/prisma.service';
 import { Response, Request } from 'express';
 import * as crypto from 'crypto';
-// @ts-ignore - cos-nodejs-sdk-v5 has no types
 import COS from 'cos-nodejs-sdk-v5';
+
+interface CosClient {
+  setConfig(config: Record<string, unknown>): void;
+  putObject(params: Record<string, unknown>, callback: (err: Error | null) => void): void;
+  getObjectUrl(
+    params: Record<string, unknown>,
+    callback: (err: Error | null, url: string) => void,
+  ): void;
+}
+
+type AuthenticatedRequest = Request & { user: { sub: string | number } };
 
 @Controller('users')
 export class GdprController {
-  private cos: any = null;
+  private cos: CosClient | null = null;
 
   constructor(private readonly prisma: PrismaService) {}
 
-  private getCos(): any | null {
+  private getCos(): CosClient | null {
     if (!this.cos) {
       const secretId = process.env.COS_SECRET_ID || '';
       const secretKey = process.env.COS_SECRET_KEY || '';
@@ -29,7 +32,7 @@ export class GdprController {
           this.cos = new COS({
             SecretId: secretId,
             SecretKey: secretKey,
-          });
+          }) as unknown as CosClient;
           this.cos.setConfig({ Region: region });
         } catch {
           return null;
@@ -53,8 +56,8 @@ export class GdprController {
 
   @Get('data-export')
   @UseGuards(JwtAuthGuard)
-  async exportUserData(@Req() req: Request, @Res() res: Response) {
-    const userId = BigInt((req as any).user.sub);
+  async exportUserData(@Req() req: AuthenticatedRequest, @Res() res: Response) {
+    const userId = BigInt(req.user.sub);
 
     const [user, tasks, orders, reviews, transactions, tickets] = await Promise.all([
       this.prisma.user.findUnique({ where: { id: userId } }),
@@ -139,8 +142,8 @@ export class GdprController {
 
   @Delete('account')
   @UseGuards(JwtAuthGuard)
-  async deleteAccount(@Req() req: Request) {
-    const userId = BigInt((req as any).user.sub);
+  async deleteAccount(@Req() req: AuthenticatedRequest) {
+    const userId = BigInt(req.user.sub);
 
     await this.prisma.$transaction(async (tx) => {
       await tx.user.update({

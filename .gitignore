@@ -77,3 +77,19 @@ backend/admin-service/target/
 
 # ===== Trae 本地缓存 =====
 .trae/cache/
+
+# ===== 临时测试文件 =====
+smoke-shots/
+*-report.json
+*-report.md
+perf-test-*.cjs
+smoke-test.cjs
+test-chat-*.cjs
+test-listener-leak.cjs
+verify-conversations.cjs
+
+# ===== IDE 工作区 =====
+*.code-workspace
+
+# ===== 运行时上传文件 =====
+bff/uploads/
