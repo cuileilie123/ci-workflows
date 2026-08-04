@@ -14,13 +14,13 @@ module.exports = {
   env: {
     node: true,
   },
-  ignorePatterns: ['.eslintrc.cjs', 'dist', 'node_modules'],
+  ignorePatterns: ['.eslintrc.cjs', 'dist', 'node_modules', '*.spec.ts', '*.integration.spec.ts'],
   rules: {
     '@typescript-eslint/interface-name-prefix': 'off',
     '@typescript-eslint/explicit-function-return-type': 'off',
     '@typescript-eslint/explicit-module-boundary-types': 'off',
     '@typescript-eslint/no-explicit-any': 'error',
-    '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+    '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
     'no-console': 'error',
     'prettier/prettier': 'warn',
   },

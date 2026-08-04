@@ -33,19 +33,101 @@ export interface LoginResponse {
 /** 任务状态 */
 export type TaskStatus = 'OPEN' | 'ASSIGNED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
 
-/** 任务信息 */
+/** 任务分类（与 BFF Prisma 枚举对齐） */
+export type TaskCategory =
+  | 'DELIVERY'
+  | 'SHOPPING'
+  | 'CLEANING'
+  | 'REPAIR'
+  | 'TUTORING'
+  | 'PET_CARE'
+  | 'MOVING'
+  | 'OTHER';
+
+/** 分类展示名 */
+export const TASK_CATEGORY_LABELS: Record<TaskCategory, string> = {
+  DELIVERY: '代拿快递',
+  SHOPPING: '代买物品',
+  CLEANING: '家政清洁',
+  REPAIR: '维修安装',
+  TUTORING: '辅导教学',
+  PET_CARE: '宠物照看',
+  MOVING: '搬家搬运',
+  OTHER: '其他',
+};
+
+/** 发布者摘要 */
+export interface PublisherSummary {
+  nickname: string;
+  avatar: string | null;
+}
+
+/** 任务列表项（与 BFF TaskListItem 对齐） */
+export interface TaskListItem {
+  id: string;
+  title: string;
+  price: string;
+  category: TaskCategory;
+  status: TaskStatus;
+  address: string;
+  images: string[];
+  distance?: number;
+  createdAt: string;
+  expireAt: string;
+  publisher: PublisherSummary;
+}
+
+/** 列表响应 */
+export interface TaskListResult {
+  list: TaskListItem[];
+  page: number;
+  hasMore: boolean;
+}
+
+/** 搜索响应 */
+export interface TaskSearchResult extends TaskListResult {
+  total: number;
+}
+
+/** 任务详情（与 BFF Task 对齐，BigInt id 序列化为 string） */
 export interface Task {
-  id: number;
-  publisherId: number;
+  id: string;
+  publisherId: string;
+  helperId: string | null;
   title: string;
   description: string;
-  price: number;
+  price: string;
   lng: number;
   lat: number;
   geohash: string;
+  address: string;
+  category: TaskCategory;
+  images: string[];
   status: TaskStatus;
   expireAt: string;
+  viewCount: number;
   createdAt: string;
+  updatedAt: string;
+  publisher?: PublisherSummary;
+}
+
+/** 发布任务入参 */
+export interface CreateTaskPayload {
+  title: string;
+  category: TaskCategory;
+  description: string;
+  price: number;
+  lat: number;
+  lng: number;
+  address: string;
+  images?: string[];
+  expireAt?: string;
+}
+
+/** 上传响应 */
+export interface UploadResult {
+  fileKey: string;
+  url: string;
 }
 
 /** 订单状态 */

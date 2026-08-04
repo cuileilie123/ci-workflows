@@ -45,6 +45,13 @@ jobs:
       redis:
         image: redis:7-alpine
         ports: ['6379:6379']
+    env:
+      DATABASE_URL: mysql://root:test@localhost:3306/test_db
+      REDIS_URL: redis://localhost:6379
+      JWT_SECRET: ci_test_jwt_secret
+      WX_APPID: wx_test_appid
+      WX_SECRET: wx_test_secret
+      PORT: '3000'
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v3
@@ -55,10 +62,12 @@ jobs:
           node-version: 20
           cache: 'pnpm'
           cache-dependency-path: bff/pnpm-lock.yaml
-      - run: pnpm install
+      - run: pnpm install --frozen-lockfile
       - run: pnpm prisma generate
+      - run: pnpm prisma db push
       - run: pnpm lint
       - run: pnpm test -- --coverage
+      - run: pnpm test:e2e
       - run: pnpm build
 
   # ===== 风控服务（Go）检查 =====

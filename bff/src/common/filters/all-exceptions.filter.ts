@@ -32,8 +32,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       message =
         typeof res === 'string'
           ? res
-          : (res as Record<string, unknown>).message?.toString() ??
-            exception.message;
+          : ((res as Record<string, unknown>).message?.toString() ?? exception.message);
     } else if (exception instanceof Error) {
       status = HttpStatus.INTERNAL_SERVER_ERROR;
       message = '服务器内部错误';

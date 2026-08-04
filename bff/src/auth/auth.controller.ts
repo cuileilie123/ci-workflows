@@ -1,18 +1,5 @@
-import {
-  Body,
-  Controller,
-  Get,
-  HttpCode,
-  Post,
-  Req,
-  UseGuards,
-} from '@nestjs/common';
-import {
-  ApiBearerAuth,
-  ApiBody,
-  ApiOperation,
-  ApiTags,
-} from '@nestjs/swagger';
+import { Body, Controller, Get, HttpCode, Post, Req, UseGuards } from '@nestjs/common';
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 import { AuthService } from './auth.service';
 import { RefreshDto, WxLoginDto } from './dto/wx-login.dto';
@@ -45,12 +32,8 @@ export class AuthController {
   @Post('logout')
   @HttpCode(200)
   async logout(@Req() req: Request) {
-    const accessToken = (req.headers.authorization ?? '').replace(
-      /^Bearer\s+/i,
-      '',
-    );
-    const refreshToken = (req.body as { refreshToken?: string } | undefined)
-      ?.refreshToken;
+    const accessToken = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
+    const refreshToken = (req.body as { refreshToken?: string } | undefined)?.refreshToken;
     await this.auth.logout(accessToken, refreshToken);
     return { success: true };
   }

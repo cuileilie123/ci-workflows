@@ -5,7 +5,7 @@
       <text class="subtitle">社区有偿互助平台</text>
     </view>
 
-    <view v-if="userStore.isLoggedIn" class="card user-card">
+    <view v-if="userStore.isLoggedIn" class="card user-card" @click="onProfile">
       <image
         v-if="userStore.avatar"
         class="user-avatar"
@@ -19,7 +19,7 @@
         <text class="user-name">{{ userStore.nickname }}</text>
         <text class="user-meta">信用分：{{ userStore.userInfo?.creditScore ?? 100 }}</text>
       </view>
-      <button class="logout-btn" size="mini" @click="onLogout">退出</button>
+      <text class="user-arrow">›</text>
     </view>
 
     <view class="card">
@@ -29,6 +29,11 @@
         <text class="feature-item">接单赚钱，信用担保</text>
         <text class="feature-item">微信支付，安全可靠</text>
       </view>
+    </view>
+
+    <view class="action-row">
+      <button class="action-btn nearby-btn" @click="onNearby">附近任务</button>
+      <button class="action-btn publish-btn" @click="onPublish">+ 发布任务</button>
     </view>
 
     <view class="footer">
@@ -45,6 +50,27 @@ const userStore = useUserStore();
 async function onLogout(): Promise<void> {
   await userStore.logout();
   uni.reLaunch({ url: '/pages/auth/login' });
+}
+
+function onProfile(): void {
+  if (!userStore.isLoggedIn) {
+    uni.showToast({ title: '请先登录', icon: 'none' });
+    return;
+  }
+  uni.navigateTo({ url: '/pages/user/profile' });
+}
+
+function onPublish(): void {
+  if (!userStore.isLoggedIn) {
+    uni.showToast({ title: '请先登录', icon: 'none' });
+    uni.reLaunch({ url: '/pages/auth/login' });
+    return;
+  }
+  uni.navigateTo({ url: '/pages/task/publish' });
+}
+
+function onNearby(): void {
+  uni.navigateTo({ url: '/pages/task/list' });
 }
 </script>
 
@@ -126,15 +152,10 @@ async function onLogout(): Promise<void> {
   margin-top: 8rpx;
 }
 
-.logout-btn {
+.user-arrow {
+  font-size: 40rpx;
+  color: #ccc;
   flex-shrink: 0;
-  background-color: #f5f5f5;
-  color: #666;
-  font-size: 24rpx;
-
-  &::after {
-    border: none;
-  }
 }
 
 .card-title {
@@ -173,5 +194,37 @@ async function onLogout(): Promise<void> {
 .version {
   font-size: 24rpx;
   color: #999;
+}
+
+.action-row {
+  display: flex;
+  gap: 20rpx;
+  margin-top: 40rpx;
+}
+
+.action-btn {
+  flex: 1;
+  height: 92rpx;
+  line-height: 92rpx;
+  font-size: 30rpx;
+  border-radius: 46rpx;
+  margin: 0;
+
+  &::after {
+    border: none;
+  }
+}
+
+.nearby-btn {
+  background-color: #fff;
+  color: #4caf50;
+  border: 2rpx solid #4caf50;
+  box-sizing: border-box;
+}
+
+.publish-btn {
+  flex: 1.4;
+  background-color: #4caf50;
+  color: #fff;
 }
 </style>
