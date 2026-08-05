@@ -48,6 +48,21 @@ export class WalletService {
   }
 
   /**
+   * 获取钱包信息（不加锁，读操作）
+   */
+  async getWalletByUserId(userId: bigint) {
+    const wallet = await this.prisma.wallet.findUnique({
+      where: { userId },
+    });
+
+    if (!wallet) {
+      throw new NotFoundException('钱包不存在');
+    }
+
+    return wallet;
+  }
+
+  /**
    * 复式记账核心：每笔变动原子性更新余额 + 写入流水
    * 使用 SELECT ... FOR UPDATE 行锁防止并发超扣
    */
@@ -318,7 +333,7 @@ export class WalletService {
    * 内部转账
    * 关键：按 userId 升序用 SELECT ... FOR UPDATE 获取行锁，防止 AB-BA 死锁
    */
-  async transfer(fromUserId: bigint, toUserId: bigint, amount: number, description: string) {
+  async transfer(fromUserId: bigint, toUserId: bigint, amount: number, description = '转账') {
     if (fromUserId === toUserId) {
       throw new ConflictException('不能向自己转账');
     }

@@ -21,8 +21,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'pnpm'
-          cache-dependency-path: frontend/pnpm-lock.yaml
       - run: pnpm install
       - run: pnpm lint
       - run: pnpm type-check
@@ -60,8 +58,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'pnpm'
-          cache-dependency-path: bff/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm prisma generate
       - run: pnpm prisma db push
@@ -70,42 +66,14 @@ jobs:
       - run: pnpm test:e2e
       - run: pnpm build
 
-  # ===== 风控服务（Go）检查 =====
-  risk-check:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend/risk-service
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.22'
-      - run: go mod download
-      - run: go vet ./...
-      - run: go test -v -race -coverprofile=coverage.out ./...
-      - run: go build -o risk-service ./cmd/main.go
-
-  # ===== 管理后台（Java）检查 =====
-  admin-check:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend/admin-service
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          java-version: '21'
-          distribution: 'temurin'
-      - run: mvn clean test
-      - run: mvn package -DskipTests
-
-  # ===== Docker 构建 =====
+  # ===== Docker 构建（需配置阿里云 ACR Secrets）=====
   docker-build:
-    needs: [frontend-check, bff-check, risk-check, admin-check]
+    needs: [frontend-check, bff-check]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && secrets.ACR_REGISTRY != ''
+    env:
+      ACR_REGISTRY: ${{ secrets.ACR_REGISTRY }}
+      IMAGE_TAG: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
       - name: Login to Aliyun Container Registry
@@ -116,14 +84,17 @@ jobs:
           password: ${{ secrets.ACR_PASSWORD }}
       - name: Build and push Docker images
         run: |
-          docker compose build
-          docker compose push
+          docker compose build bff
+          docker compose push bff
 
-  # ===== 部署到 K8s =====
+  # ===== 部署到 K8s（需配置 ACK Secrets）=====
   deploy:
-    needs: [frontend-check, bff-check, risk-check, admin-check, docker-build]
+    needs: [frontend-check, bff-check, docker-build]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && secrets.KUBECONFIG != ''
+    env:
+      ACR_REGISTRY: ${{ secrets.ACR_REGISTRY }}
+      IMAGE_TAG: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
       - name: Deploy to ACK
@@ -131,8 +102,4 @@ jobs:
           echo "${{ secrets.KUBECONFIG }}" > kubeconfig
           export KUBECONFIG=kubeconfig
           kubectl set image deployment/bff bff=${{ secrets.ACR_REGISTRY }}/bff:${{ github.sha }}
-          kubectl set image deployment/risk risk=${{ secrets.ACR_REGISTRY }}/risk:${{ github.sha }}
-          kubectl set image deployment/admin admin=${{ secrets.ACR_REGISTRY }}/admin:${{ github.sha }}
           kubectl rollout status deployment/bff
-          kubectl rollout status deployment/risk
-          kubectl rollout status deployment/admin

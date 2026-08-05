@@ -1,5 +1,6 @@
-/** @type {import('ts-jest').JestConfigWithTsJest} */
-module.exports = {
+import { Config } from '@jest/types';
+
+const config: Config.InitialOptions = {
   moduleFileExtensions: ['js', 'json', 'ts'],
   rootDir: 'src',
   // 集成测试用例后缀：.integration.spec.ts
@@ -13,3 +14,5 @@ module.exports = {
     '^@/(.*)$': '<rootDir>/$1',
   },
 };
+
+export default config;

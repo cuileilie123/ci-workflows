@@ -13,6 +13,12 @@ services:
       - ./scripts:/scripts
       - backup_data:/backup
     command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_PASSWORD:-root123}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   redis:
     image: redis:7-alpine
@@ -22,6 +28,12 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
 
   rabbitmq:
     image: rabbitmq:3.13-management
@@ -56,9 +68,44 @@ services:
     volumes:
       - mongo_data:/data/db
 
+  # ---- BFF 服务 ----
+  bff:
+    image: ${ACR_REGISTRY:-neighborhood-help}/bff:${IMAGE_TAG:-latest}
+    container_name: nh-bff
+    build:
+      context: ./bff
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${BFF_PORT:-3000}:3000"
+    env_file:
+      - ./bff/.env
+    environment:
+      # 覆盖数据库连接为 Docker 内部网络
+      DATABASE_URL: mysql://root:${MYSQL_PASSWORD:-root123}@mysql:3306/${MYSQL_DATABASE:-neighborhood_help}
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://admin:admin123@rabbitmq:5672
+      ES_URL: http://elasticsearch:9200
+      MONGO_URL: mongodb://mongodb:27017/neighborhood_help
+      PORT: '3000'
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/v1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
 volumes:
   mysql_data:
   redis_data:
   es_data:
   mongo_data:
   backup_data:
+  uploads_data:

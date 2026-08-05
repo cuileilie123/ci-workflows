@@ -110,34 +110,37 @@ export class PaymentService {
 
       // 3. 根据交易状态更新订单
       if (decrypted.trade_state === 'SUCCESS') {
-        await this.prisma.order.update({
-          where: { id: orderId },
-          data: {
-            status: 'PAID',
-            paidAt: new Date(),
-          },
-        });
-        this.logger.log(`支付成功: orderId=${orderId}`);
-
-        // 4. 同时更新任务状态为 IN_PROGRESS
-        const order = await this.prisma.order.findUnique({ where: { id: orderId } });
-        if (order) {
-          await this.prisma.task.update({
-            where: { id: order.taskId },
-            data: { status: 'IN_PROGRESS' },
+        // 🔒 使用事务确保一致性，并按预定顺序操作（先order后task，防止死锁）
+        await this.prisma.$transaction(async (tx) => {
+          // 先更新订单（按字母顺序，order排在task前面）
+          await tx.order.update({
+            where: { id: orderId },
+            data: {
+              status: 'PAID',
+              paidAt: new Date(),
+            },
           });
-        }
+          
+          this.logger.log(`支付成功: orderId=${orderId}`);
 
-        // 5. 写入钱包流水（接单者收入，冻结）
-        if (order) {
-          await this.createTransaction(
-            order.helperId,
-            order.id,
-            'FREEZE',
-            Number(order.totalAmount),
-            '任务报酬（冻结中）',
-          );
-        }
+          // 再更新任务（按字母顺序，task排在后面）
+          const order = await tx.order.findUnique({ where: { id: orderId } });
+          if (order) {
+            await tx.task.update({
+              where: { id: order.taskId },
+              data: { status: 'IN_PROGRESS' },
+            });
+
+            // 5. 写入钱包流水（接单者收入，冻结）- 在同一事务中
+            await this.createTransaction(
+              order.helperId,
+              order.id,
+              'FREEZE',
+              Number(order.totalAmount),
+              '任务报酬（冻结中）',
+            );
+          }
+        });
       } else if (decrypted.trade_state === 'CLOSED') {
         await this.prisma.order.update({
           where: { id: orderId },
@@ -228,17 +231,23 @@ export class PaymentService {
 
     let cancelled = 0;
     for (const order of expiredOrders) {
-      await this.prisma.order.update({
-        where: { id: order.id },
-        data: { status: 'CANCELLED' },
-      });
-      // 释放任务
-      if (order.task.status === 'ASSIGNED') {
-        await this.prisma.task.update({
-          where: { id: order.task.id },
-          data: { status: 'OPEN', helperId: null },
+      // 🔒 使用事务确保一致性，并按预定顺序操作（先order后task，防止死锁）
+      await this.prisma.$transaction(async (tx) => {
+        // 先更新订单（按字母顺序，order排在task前面）
+        await tx.order.update({
+          where: { id: order.id },
+          data: { status: 'CANCELLED' },
         });
-      }
+        
+        // 再更新任务（按字母顺序，task排在后面）
+        if (order.task.status === 'ASSIGNED') {
+          await tx.task.update({
+            where: { id: order.task.id },
+            data: { status: 'OPEN', helperId: null },
+          });
+        }
+      });
+      
       cancelled++;
       this.logger.log(`超时订单已取消: orderId=${order.id}`);
     }
