@@ -7,7 +7,6 @@ on:
     branches: [main]
 
 jobs:
-  # ===== 前端检查 =====
   frontend-check:
     runs-on: ubuntu-latest
     defaults:
@@ -26,7 +25,6 @@ jobs:
       - run: pnpm type-check
       - run: pnpm build:mp-weixin
 
-  # ===== BFF 检查 =====
   bff-check:
     runs-on: ubuntu-latest
     defaults:
@@ -39,19 +37,18 @@ jobs:
           MYSQL_ROOT_PASSWORD: test
           MYSQL_DATABASE: test_db
         ports:
-          - 3306:3306
-        options: --health-cmd="mysqladmin ping" --health-timeout=5s
+          - "3306:3306"
       redis:
         image: redis:7-alpine
         ports:
-          - 6379:6379
+          - "6379:6379"
     env:
-      DATABASE_URL: mysql://root:test@localhost:3306/test_db
-      REDIS_URL: redis://localhost:6379
-      JWT_SECRET: ci_test_jwt_secret
-      WX_APPID: wx_test_appid
-      WX_SECRET: wx_test_secret
-      PORT: '3000'
+      DATABASE_URL: "mysql://root:test@localhost:3306/test_db"
+      REDIS_URL: "redis://localhost:6379"
+      JWT_SECRET: "ci_test_jwt_secret"
+      WX_APPID: "wx_test_appid"
+      WX_SECRET: "wx_test_secret"
+      PORT: "3000"
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v3
@@ -65,17 +62,11 @@ jobs:
       - run: pnpm prisma db push
       - run: pnpm lint
       - run: pnpm test -- --coverage
-      # ==============================================
-      # 🔒 专项：并发死锁修复回归测试（WalletModule + PaymentModule）
-      # 覆盖 AB-BA 双向转账、跨表 order→task 顺序、并发超扣防护等场景
-      # 即使 pnpm test 已隐式执行，此处也独立输出详细日志便于排查
-      # ==============================================
       - name: "Concurrent Deadlock Regression Tests"
         run: pnpm test:deadlock
       - run: pnpm test:e2e
       - run: pnpm build
 
-  # ===== Docker 构建（需配置阿里云 ACR Secrets）=====
   docker-build:
     needs: [frontend-check, bff-check]
     runs-on: ubuntu-latest
@@ -96,7 +87,6 @@ jobs:
           docker compose build bff
           docker compose push bff
 
-  # ===== 部署到 K8s（需配置 ACK Secrets）=====
   deploy:
     needs: [frontend-check, bff-check, docker-build]
     runs-on: ubuntu-latest
