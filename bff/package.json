@@ -13,6 +13,7 @@
     "test": "jest --config jest.config.ts",
     "test:watch": "jest --config jest.config.ts --watch",
     "test:cov": "jest --config jest.config.ts --coverage",
+    "test:deadlock": "jest --config jest.config.ts --testPathPatterns=\"deadlock\" --verbose",
     "test:e2e": "jest --config jest.integration.config.ts --runInBand --testTimeout=30000"
   },
   "dependencies": {

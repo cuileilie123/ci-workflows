@@ -63,6 +63,13 @@ jobs:
       - run: pnpm prisma db push
       - run: pnpm lint
       - run: pnpm test -- --coverage
+      # ==============================================
+      # 🔒 专项：并发死锁修复回归测试（WalletModule + PaymentModule）
+      # 覆盖 AB-BA 双向转账、跨表 order→task 顺序、并发超扣防护等场景
+      # 即使 pnpm test 已隐式执行，此处也独立输出详细日志便于排查
+      # ==============================================
+      - name: 🔒 Concurrent Deadlock Regression Tests
+        run: pnpm test:deadlock
       - run: pnpm test:e2e
       - run: pnpm build
 

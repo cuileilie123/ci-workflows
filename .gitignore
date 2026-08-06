@@ -87,6 +87,7 @@ smoke-test.cjs
 test-chat-*.cjs
 test-listener-leak.cjs
 verify-conversations.cjs
+bff/scripts/_abba_env.ps1
 
 # ===== IDE 工作区 =====
 *.code-workspace

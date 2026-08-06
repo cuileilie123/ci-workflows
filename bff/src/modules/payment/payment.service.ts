@@ -85,14 +85,22 @@ export class PaymentService {
     signature: string,
     body: unknown,
   ): Promise<{ code: string; message: string }> {
+    const traceId = `PAY-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    const T = `💳[${traceId}]`;
     const bodyStr = JSON.stringify(body);
 
+    this.logger.log(
+      `${T} [NOTIFY-START] 支付回调到达: timestamp=${timestamp}, nonce=${nonce}, bodyLength=${bodyStr.length}`,
+    );
+
     // 1. 验签
+    this.logger.log(`${T} [VERIFY-SIG] 执行微信支付验签...`);
     const valid = this.wxPay.verifySignature(timestamp, nonce, bodyStr, signature);
     if (!valid) {
-      this.logger.error('支付回调验签失败');
+      this.logger.error(`${T} [VERIFY-SIG] ❌ 验签失败，拒绝进入任何事务`);
       throw new ForbiddenException('签名验证失败');
     }
+    this.logger.log(`${T} [VERIFY-SIG] ✅ 验签通过`);
 
     try {
       const b = body as {
@@ -100,19 +108,29 @@ export class PaymentService {
       };
 
       if (!b?.resource) {
-        this.logger.warn('回调报文中无 resource');
+        this.logger.warn(`${T} [SKIP] 回调报文中无 resource，直接返回 SUCCESS（无需事务）`);
         return { code: 'SUCCESS', message: '成功' };
       }
 
       // 2. 解密
+      this.logger.log(`${T} [DECRYPT] 解密回调 resource...`);
       const decrypted = this.wxPay.decryptResource(b.resource);
       const orderId = BigInt(decrypted.out_trade_no);
+      this.logger.log(
+        `${T} [DECRYPT] ✅ 解密完成: out_trade_no=${orderId.toString()}, trade_state=${decrypted.trade_state}`,
+      );
 
       // 3. 根据交易状态更新订单
       if (decrypted.trade_state === 'SUCCESS') {
+        this.logger.log(
+          `${T} [TX-START] trade_state=SUCCESS → 进入 $transaction，按字母序 order→task 顺序更新（防止 AB-BA 死锁）`,
+        );
         // 🔒 使用事务确保一致性，并按预定顺序操作（先order后task，防止死锁）
         await this.prisma.$transaction(async (tx) => {
           // 先更新订单（按字母顺序，order排在task前面）
+          this.logger.log(
+            `${T} [①-UPDATE-ORDER] ① 先更新 order.update(id=${orderId.toString()}): PENDING → PAID`,
+          );
           await tx.order.update({
             where: { id: orderId },
             data: {
@@ -120,18 +138,29 @@ export class PaymentService {
               paidAt: new Date(),
             },
           });
+          this.logger.log(`${T} [①-UPDATE-ORDER] ① ✅ order.update 完成`);
           
           this.logger.log(`支付成功: orderId=${orderId}`);
 
           // 再更新任务（按字母顺序，task排在后面）
+          this.logger.log(
+            `${T} [READ-ORDER] 读取 order(id=${orderId.toString()}) 取关联 taskId / helperId / totalAmount`,
+          );
           const order = await tx.order.findUnique({ where: { id: orderId } });
           if (order) {
+            this.logger.log(
+              `${T} [②-UPDATE-TASK] ② 再更新 task(id=${order.taskId.toString()}): ASSIGNED → IN_PROGRESS（按字母序 order 在前 → task 在后）`,
+            );
             await tx.task.update({
               where: { id: order.taskId },
               data: { status: 'IN_PROGRESS' },
             });
+            this.logger.log(`${T} [②-UPDATE-TASK] ② ✅ task.update 完成`);
 
             // 5. 写入钱包流水（接单者收入，冻结）- 在同一事务中
+            this.logger.log(
+              `${T} [WALLET] 写入钱包流水 FREEZE: helperId=${order.helperId.toString()}, orderId=${order.id.toString()}, 金额=${Number(order.totalAmount).toFixed(2)} → 任务报酬（冻结中）`,
+            );
             await this.createTransaction(
               order.helperId,
               order.id,
@@ -139,14 +168,30 @@ export class PaymentService {
               Number(order.totalAmount),
               '任务报酬（冻结中）',
             );
+            this.logger.log(`${T} [WALLET] ✅ 钱包流水写入完成`);
+
+            this.logger.log(
+              `${T} [TX-COMMIT] ✅ 支付事务提交成功: order=${orderId.toString()} → task=${order.taskId.toString()}，跨表顺序 order① → task② 无死锁风险`,
+            );
+          } else {
+            this.logger.warn(
+              `${T} [TX-COMMIT] ⚠️ order 回读后为空，仅已提交 order.update，跳过 task.update 和钱包流水`,
+            );
           }
         });
       } else if (decrypted.trade_state === 'CLOSED') {
+        this.logger.log(
+          `${T} [SINGLE-TABLE] trade_state=CLOSED → 单表 order.update，无需事务，无死锁风险`,
+        );
         await this.prisma.order.update({
           where: { id: orderId },
           data: { status: 'CANCELLED' },
         });
         this.logger.log(`订单已关闭: orderId=${orderId}`);
+      } else {
+        this.logger.log(
+          `${T} [IGNORE] trade_state=${decrypted.trade_state} 暂不处理，直接返回 SUCCESS`,
+        );
       }
 
       return { code: 'SUCCESS', message: '成功' };
@@ -221,6 +266,12 @@ export class PaymentService {
 
   // ============ 5. 取消超时订单 ============
   async cancelExpiredOrders(): Promise<number> {
+    const batchTrace = `BATCH-${Date.now().toString(36)}`;
+    const BT = `⏰[${batchTrace}]`;
+    this.logger.log(
+      `${BT} [BATCH-START] 扫描超时订单: status=PENDING, 早于 ${new Date(Date.now() - ORDER_EXPIRE_SECONDS * 1000).toISOString()} (${ORDER_EXPIRE_SECONDS}秒前)`,
+    );
+
     const expiredOrders = await this.prisma.order.findMany({
       where: {
         status: 'PENDING',
@@ -229,28 +280,62 @@ export class PaymentService {
       include: { task: { select: { id: true, status: true } } },
     });
 
+    this.logger.log(`${BT} [BATCH-FOUND] 共发现 ${expiredOrders.length} 笔超时 PENDING 订单`);
+
     let cancelled = 0;
+    let orderIdx = 0;
     for (const order of expiredOrders) {
+      orderIdx++;
+      const orderTrace = `${batchTrace}-${orderIdx}`;
+      const T = `🧾[${orderTrace}]`;
+
+      this.logger.log(
+        `${T} [CANCEL-${orderIdx}/${expiredOrders.length}] 准备取消订单: orderId=${order.id.toString()}, taskId=${order.task.id.toString()}, task.status=${order.task.status}`,
+      );
+      this.logger.log(
+        `${T} [TX-START] 进入 $transaction，按字母序 order① → task② 顺序更新（防止 AB-BA 死锁）`,
+      );
+
       // 🔒 使用事务确保一致性，并按预定顺序操作（先order后task，防止死锁）
       await this.prisma.$transaction(async (tx) => {
         // 先更新订单（按字母顺序，order排在task前面）
+        this.logger.log(
+          `${T} [①-UPDATE-ORDER] ① 先更新 order.update(id=${order.id.toString()}): PENDING → CANCELLED`,
+        );
         await tx.order.update({
           where: { id: order.id },
           data: { status: 'CANCELLED' },
         });
+        this.logger.log(`${T} [①-UPDATE-ORDER] ① ✅ order.update 完成`);
         
         // 再更新任务（按字母顺序，task排在后面）
         if (order.task.status === 'ASSIGNED') {
+          this.logger.log(
+            `${T} [②-UPDATE-TASK] ② 再更新 task(id=${order.task.id.toString()}): ASSIGNED → OPEN, helperId=null（按字母序 order① → task②）`,
+          );
           await tx.task.update({
             where: { id: order.task.id },
             data: { status: 'OPEN', helperId: null },
           });
+          this.logger.log(`${T} [②-UPDATE-TASK] ② ✅ task.update 完成`);
+        } else {
+          this.logger.log(
+            `${T} [②-SKIP-TASK] ② task.status=${order.task.status} !== ASSIGNED，跳过 task.update（无需跨表顺序，仍保持只锁 order 一表）`,
+          );
         }
+
+        this.logger.log(
+          `${T} [TX-COMMIT] ✅ 取消超时订单事务提交: order=${order.id.toString()} ${order.task.status === 'ASSIGNED' ? `→ 同步回收任务 ${order.task.id.toString()}` : ''}，跨表顺序 order① → task② 无死锁风险`,
+        );
       });
       
       cancelled++;
-      this.logger.log(`超时订单已取消: orderId=${order.id}`);
+      this.logger.log(`${BT} [PROGRESS] 已处理 ${cancelled}/${expiredOrders.length}: orderId=${order.id.toString()}`);
     }
+
+    this.logger.log(
+      `${BT} [BATCH-DONE] 超时订单批量取消完成: 成功取消=${cancelled} / 扫描总数=${expiredOrders.length}`,
+    );
 
     return cancelled;
   }
