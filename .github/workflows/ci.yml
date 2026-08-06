@@ -26,7 +26,7 @@ jobs:
         ports:
           - 3306:3306
         options: >-
-          --health-calc "mysqladmin ping"
+          --health-cmd "mysqladmin ping"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -35,7 +35,7 @@ jobs:
         ports:
           - 6379:6379
         options: >-
-          --health-calc "redis-cli ping"
+          --health-cmd "redis-cli ping"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
