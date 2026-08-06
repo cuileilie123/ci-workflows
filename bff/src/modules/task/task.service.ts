@@ -210,9 +210,12 @@ export class TaskService {
     const uid = BigInt(userId);
     const lockKey = `task:lock:${id}`;
 
-    // 1. Redis 分布式锁（防惊群）；Redis 不可用时跳过，依赖 DB 条件更新兜底
-    const locked = await this.redis.setNx(lockKey, userId, ACCEPT_LOCK_TTL);
-    if (this.redis.isAvailable() && !locked) {
+    // 1. Redis 分布式锁（增强版：看门狗告警 + 自动续期 + 安全释放）
+    const lockHandle = await this.redis.acquireLock(lockKey, userId, ACCEPT_LOCK_TTL, {
+      context: `接单 taskId=${id}, userId=${userId}`,
+      alertThresholdMs: ACCEPT_LOCK_TTL * 1000 * 3, // 超过 3 倍 TTL（30s）触发告警
+    });
+    if (this.redis.isAvailable() && !lockHandle) {
       throw new ConflictException('任务正在被接单，请稍后重试');
     }
 
@@ -246,7 +249,12 @@ export class TaskService {
 
       return (await this.prisma.task.findUnique({ where: { id: taskId } }))!;
     } finally {
-      await this.redis.del(lockKey);
+      // 使用原子释放（Lua 脚本校验 value，防止误删他人锁）
+      if (lockHandle) {
+        await lockHandle.release();
+      } else {
+        await this.redis.del(lockKey);
+      }
     }
   }
 

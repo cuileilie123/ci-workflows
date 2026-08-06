@@ -2,6 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { TokenBlacklistService } from './token-blacklist.service';
 import { SensitiveService } from './sensitive.service';
 import { RedisService } from './redis.service';
+import { LockAlertService } from './lock-alert.service';
 
 /**
  * 全局公共模块：提供跨模块共享的单例服务。
@@ -9,7 +10,7 @@ import { RedisService } from './redis.service';
  */
 @Global()
 @Module({
-  providers: [TokenBlacklistService, SensitiveService, RedisService],
-  exports: [TokenBlacklistService, SensitiveService, RedisService],
+  providers: [TokenBlacklistService, SensitiveService, RedisService, LockAlertService],
+  exports: [TokenBlacklistService, SensitiveService, RedisService, LockAlertService],
 })
 export class CommonModule {}

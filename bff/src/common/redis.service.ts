@@ -1,5 +1,179 @@
 import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import Redis from 'ioredis';
+import { LockAlertService } from './lock-alert.service';
+
+/**
+ * 锁配置选项
+ */
+export interface AcquireLockOptions {
+  /** 锁被持有时长告警阈值（毫秒），超过此值触发告警，默认 30_000ms */
+  alertThresholdMs?: number;
+  /** 是否启动看门狗自动告警，默认 true */
+  enableWatchdog?: boolean;
+  /** 业务上下文描述，用于告警日志 */
+  context?: string;
+}
+
+/**
+ * 可重入的分布式锁句柄
+ *
+ * 用法：
+ *   const handle = await redis.acquireLock('task:lock:1', 'user-123', 10);
+ *   if (!handle) throw new ConflictException('获取锁失败');
+ *   try {
+ *     // 业务逻辑（锁被看门狗监控，超时自动告警）
+ *   } finally {
+ *     await handle.release(); // 原子释放（校验 value 防止误删他人锁）
+ *   }
+ */
+export class LockHandle {
+  private readonly logger = new Logger('LOCK');
+  private watchdogTimer: ReturnType<typeof setTimeout> | null = null;
+  private renewedTimers: ReturnType<typeof setTimeout>[] = [];
+  private readonly acquiredAt: number;
+
+  constructor(
+    private readonly redis: Redis | null,
+    private readonly lockAlert: LockAlertService,
+    private readonly key: string,
+    private readonly value: string,
+    private readonly ttlSec: number,
+    private readonly alertThresholdMs: number,
+    private readonly context: string,
+  ) {
+    this.acquiredAt = Date.now();
+  }
+
+  /**
+   * 启动看门狗：当锁持有时长超过告警阈值时发送告警。
+   * 同时每 TTL/3 自动续期，防止业务执行中锁过期。
+   */
+  startWatchdog(): this {
+    this.stopWatchdog();
+
+    // 告警计时器：超过 alertThresholdMs 触发告警
+    this.watchdogTimer = setTimeout(async () => {
+      const heldMs = Date.now() - this.acquiredAt;
+      await this.lockAlert.onLockTimeout(
+        this.key,
+        this.value,
+        heldMs,
+        this.ttlSec,
+        this.context,
+      );
+    }, this.alertThresholdMs);
+
+    // 自动续期：每 TTL/3 续期一次，防止长任务执行中锁过期
+    const renewIntervalMs = (this.ttlSec * 1000) / 3;
+    const scheduleRenew = () => {
+      const timer = setTimeout(async () => {
+        try {
+          await this.renew();
+          scheduleRenew(); // 继续下一次续期
+        } catch {
+          // 续期失败（可能锁已被他人获取），不再续期
+          this.logger.warn(`🔄 锁续期失败: key=${this.key}，停止续期`);
+        }
+      }, renewIntervalMs);
+      this.renewedTimers.push(timer);
+    };
+    scheduleRenew();
+
+    return this;
+  }
+
+  /**
+   * 停止看门狗
+   */
+  stopWatchdog(): void {
+    if (this.watchdogTimer) {
+      clearTimeout(this.watchdogTimer);
+      this.watchdogTimer = null;
+    }
+    for (const t of this.renewedTimers) {
+      clearTimeout(t);
+    }
+    this.renewedTimers = [];
+  }
+
+  /**
+   * 原子续期：仅当锁 value 匹配时才延长 TTL
+   */
+  async renew(): Promise<boolean> {
+    if (!this.redis) return false;
+    try {
+      const res = await this.redis.eval(
+        RENEW_SCRIPT,
+        1,
+        this.key,
+        this.value,
+        this.ttlSec,
+      );
+      return res === 1;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * 原子释放锁：仅当锁 value 匹配时才删除（使用 Lua 脚本防止误删）
+   */
+  async release(): Promise<boolean> {
+    this.stopWatchdog();
+    if (!this.redis) return true; // Redis 不可用时跳过
+    try {
+      const res = await this.redis.eval(
+        UNLOCK_SCRIPT,
+        1,
+        this.key,
+        this.value,
+      );
+      return res === 1;
+    } catch {
+      return false;
+    }
+  }
+
+  /** 获取锁已持有时长（毫秒） */
+  getHeldDurationMs(): number {
+    return Date.now() - this.acquiredAt;
+  }
+
+  getKey(): string {
+    return this.key;
+  }
+
+  getValue(): string {
+    return this.value;
+  }
+
+  getTtlSec(): number {
+    return this.ttlSec;
+  }
+}
+
+/**
+ * 解锁 Lua 脚本：仅当 value 匹配时才删除 key
+ * 防止：A 的锁 TTL 过期后，B 获取了锁，此时 A 执行 del 误删 B 的锁
+ */
+const UNLOCK_SCRIPT = `
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+  return redis.call("DEL", KEYS[1])
+else
+  return 0
+end
+`;
+
+/**
+ * 续期 Lua 脚本：仅当 value 匹配时才延长 TTL
+ */
+const RENEW_SCRIPT = `
+if redis.call("GET", KEYS[1]) == ARGV[1] then
+  return redis.call("EXPIRE", KEYS[1], ARGV[2])
+else
+  return 0
+end
+`;
 
 /**
  * Redis 服务（全局共享）。
@@ -17,7 +191,7 @@ export class RedisService implements OnModuleDestroy {
   private readonly client: Redis | null;
   private available = false;
 
-  constructor() {
+  constructor(private readonly lockAlert: LockAlertService) {
     const host = process.env.REDIS_HOST || 'localhost';
     const port = Number(process.env.REDIS_PORT) || 6379;
     const password = process.env.REDIS_PASSWORD || undefined;
@@ -108,6 +282,63 @@ export class RedisService implements OnModuleDestroy {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * 获取分布式锁（增强版）：返回 LockHandle，支持看门狗告警和自动续期。
+   *
+   * @param key 锁 key
+   * @param value 锁持有者标识（用于安全释放，防止误删）
+   * @param ttlSec 锁 TTL（秒）
+   * @param options 可选配置
+   * @returns LockHandle（获取成功）或 null（获取失败）
+   *
+   * 使用示例：
+   * ```ts
+   * const handle = await redis.acquireLock('task:1', 'user:123', 10, { context: '接单' });
+   * if (!handle) throw new ConflictException('任务正在被接单');
+   * try {
+   *   // 业务逻辑
+   * } finally {
+   *   await handle.release();
+   * }
+   * ```
+   */
+  async acquireLock(
+    key: string,
+    value: string,
+    ttlSec: number,
+    options: AcquireLockOptions = {},
+  ): Promise<LockHandle | null> {
+    const {
+      alertThresholdMs = ttlSec * 1000 * 2, // 默认 2 倍 TTL 时长触发告警
+      enableWatchdog = true,
+      context = '',
+    } = options;
+
+    const locked = await this.setNx(key, value, ttlSec);
+    if (!locked) {
+      if (this.isAvailable()) {
+        await this.lockAlert.onLockAcquireFailed(key, value, context);
+      }
+      return null;
+    }
+
+    const handle = new LockHandle(
+      this.client,
+      this.lockAlert,
+      key,
+      value,
+      ttlSec,
+      alertThresholdMs,
+      context,
+    );
+
+    if (enableWatchdog) {
+      handle.startWatchdog();
+    }
+
+    return handle;
   }
 
   async onModuleDestroy(): Promise<void> {
