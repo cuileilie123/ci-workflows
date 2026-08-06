@@ -8,6 +8,7 @@ import {
   Query,
   BadRequestException,
   ServiceUnavailableException,
+  HttpException,
   Logger,
 } from '@nestjs/common';
 import { Request } from 'express';
@@ -15,11 +16,17 @@ import { WalletService, TransactionType } from './wallet.service';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { WithdrawDto, TransferDto, TransactionQueryDto } from './dto/withdraw.dto';
 import { PrismaService } from '../../prisma/prisma.service';
+import { RedisService } from '../../common/redis.service';
 import { WxPayUtil } from '../payment/wx-pay.util';
 
 type AuthenticatedRequest = Request & { user: { sub: string | number; openid?: string } };
 
 const LARGE_WITHDRAW_THRESHOLD = 1000;
+/** 单笔提现上限（元） */
+const MAX_WITHDRAW_AMOUNT = 5000;
+/** 提现限流：每小时最多 3 次 */
+const WITHDRAW_RATE_LIMIT_POINTS = 3;
+const WITHDRAW_RATE_LIMIT_WINDOW_SEC = 3600;
 
 @Controller('wallet')
 @UseGuards(JwtAuthGuard)
@@ -29,6 +36,7 @@ export class WalletController {
   constructor(
     private readonly walletService: WalletService,
     private readonly prisma: PrismaService,
+    private readonly redisService: RedisService,
     private readonly wxPay: WxPayUtil,
   ) {}
 
@@ -68,11 +76,24 @@ export class WalletController {
     if (amount < 1) {
       throw new BadRequestException('最低提现 1 元');
     }
-    if (amount > 50000) {
-      throw new BadRequestException('单笔提现不能超过 50000 元');
+    if (amount > MAX_WITHDRAW_AMOUNT) {
+      throw new BadRequestException(`单笔提现不能超过 ${MAX_WITHDRAW_AMOUNT} 元`);
     }
 
-    // 2. 大额需审核
+    // 2. 限流：每小时最多 3 次提现（Redis 不可用时降级放行）
+    const rateLimit = await this.redisService.rateLimit(
+      `ratelimit:withdraw:${userId}`,
+      WITHDRAW_RATE_LIMIT_POINTS,
+      WITHDRAW_RATE_LIMIT_WINDOW_SEC,
+    );
+    if (!rateLimit.allowed) {
+      throw new HttpException(
+        `提现过于频繁，每小时最多 ${WITHDRAW_RATE_LIMIT_POINTS} 次，请稍后再试`,
+        429,
+      );
+    }
+
+    // 3. 大额需审核
     if (amount > LARGE_WITHDRAW_THRESHOLD) {
       return {
         status: 'AUDIT_REQUIRED',
@@ -81,14 +102,14 @@ export class WalletController {
       };
     }
 
-    // 3. 冻结提现金额（独立事务，确保冻结成功后再调用外部API）
+    // 4. 冻结提现金额（独立事务，确保冻结成功后再调用外部API）
     await this.walletService.recordTransaction(userId, 'FREEZE', amount, `提现冻结 ${amount} 元`);
 
     try {
       if (!openid) {
         throw new BadRequestException('缺少微信 openid，无法提现');
       }
-      // 4. 调用微信企业付款 API（V3 版本）
+      // 5. 调用微信企业付款 API（V3 版本）
       const result = await this.transferToWxWallet(openid, amount);
 
       if (result.status === 'SUCCESS') {

@@ -87,7 +87,7 @@
                 placeholder="请输入提现金额"
               />
             </view>
-            <text class="form-hint">单笔提现最低 1 元，最高 50000 元</text>
+            <text class="form-hint">单笔提现最低 1 元，最高 5000 元</text>
             <text class="form-hint" v-if="Number(withdrawAmount) > 1000">
               大额提现（>1000元）需人工审核
             </text>

@@ -4,7 +4,7 @@ export class WithdrawDto {
   @IsNumber({}, { message: '提现金额必须为数字' })
   @IsNotEmpty({ message: '提现金额不能为空' })
   @Min(1, { message: '最低提现 1 元' })
-  @Max(50000, { message: '单笔提现不能超过 50000 元' })
+  @Max(5000, { message: '单笔提现不能超过 5000 元' })
   amount!: number;
 }
 

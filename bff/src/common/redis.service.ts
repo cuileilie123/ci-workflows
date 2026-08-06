@@ -176,6 +176,29 @@ end
 `;
 
 /**
+ * 固定窗口限流 Lua 脚本：
+ * INCR 计数，首次请求时设置窗口 TTL，后续请求仅递增。
+ * 整个操作原子执行，避免 INCR 与 EXPIRE 之间的竞态。
+ */
+const RATE_LIMIT_SCRIPT = `
+local count = redis.call("INCR", KEYS[1])
+if count == 1 then
+  redis.call("EXPIRE", KEYS[1], ARGV[1])
+end
+return count
+`;
+
+/** 限流结果 */
+export interface RateLimitResult {
+  /** 是否放行 */
+  allowed: boolean;
+  /** 窗口内剩余可用次数 */
+  remaining: number;
+  /** 当前窗口已使用次数 */
+  count: number;
+}
+
+/**
  * Redis 服务（全局共享）。
  *
  * 连接失败时优雅降级：
@@ -281,6 +304,30 @@ export class RedisService implements OnModuleDestroy {
       return res === 'OK';
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * 固定窗口限流（原子操作）。
+   * Redis 不可用时降级放行（allowed=true），与缓存降级策略一致。
+   *
+   * @param key 限流 key（建议带用户ID，如 `ratelimit:withdraw:123`）
+   * @param limit 窗口内允许的最大请求次数
+   * @param windowSec 窗口时长（秒）
+   */
+  async rateLimit(key: string, limit: number, windowSec: number): Promise<RateLimitResult> {
+    if (!this.isAvailable() || !this.client) {
+      return { allowed: true, remaining: limit, count: 0 };
+    }
+    try {
+      const count = await this.client.eval(RATE_LIMIT_SCRIPT, 1, key, windowSec);
+      const c = Number(count);
+      if (c > limit) {
+        return { allowed: false, remaining: 0, count: c };
+      }
+      return { allowed: true, remaining: limit - c, count: c };
+    } catch {
+      return { allowed: true, remaining: limit, count: 0 };
     }
   }
 
