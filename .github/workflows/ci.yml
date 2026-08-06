@@ -48,8 +48,10 @@ jobs:
         with:
           node-version: 20
       - run: pnpm install --frozen-lockfile
+      - run: pnpm prisma generate
       - run: pnpm lint
-      - run: pnpm test -- --testPathPatterns=deadlock --passWithNoTests
+      - name: Unit Tests
+        run: pnpm test -- --passWithNoTests
       - name: Concurrent Deadlock Regression Tests
         run: pnpm test -- --testPathPatterns=deadlock --forceExit --detectOpenHandles
         timeout-minutes: 5
