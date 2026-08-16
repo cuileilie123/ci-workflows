@@ -18,7 +18,15 @@ on:
   pull_request:
     branches: [main, develop]
     paths:
-      - 'scripts/**'
+      # 仅备份恢复相关脚本，避免其他测试/辅助脚本（如模拟登录、CORS 压测等）误触发
+      - 'scripts/backup.sh'
+      - 'scripts/restore.sh'
+      - 'scripts/verify-backup.sh'
+      - 'scripts/test-fault-recovery.sh'
+      - 'scripts/parse_test_report.py'
+      - 'scripts/pr-comment.py'
+      - 'scripts/cleanup-old-backups.sh'
+      - 'scripts/binlog-backup.sh'
       - 'deploy/**'
       - 'docker-compose*.yml'
       - 'Dockerfile*'
@@ -126,11 +134,18 @@ jobs:
 
           echo ""
           echo "[INFO] MySQL 版本信息:"
-          docker exec nh-mysql mysql -uroot -p${{ env.MYSQL_PASSWORD }} -V 2>/dev/null
+          docker exec nh-mysql mysql -uroot -p${{ env.MYSQL_PASSWORD }} -V || {
+            echo "::error::mysql -V 执行失败，可能容器内客户端不可用"
+            exit 1
+          }
           echo ""
-
           echo "[INFO] MySQL 数据库列表:"
-          docker exec nh-mysql mysql -uroot -p${{ env.MYSQL_PASSWORD }} -e "SHOW DATABASES" 2>/dev/null | sed 's/^/  /'
+          # 使用变量捕获而非管道 pipefail 吞错；保留 stderr 便于调试
+          DB_LIST=$(docker exec nh-mysql mysql -uroot -p${{ env.MYSQL_PASSWORD }} -N -e "SHOW DATABASES" 2>&1) || {
+            echo "::error::SHOW DATABASES 失败，输出: $DB_LIST"
+            exit 1
+          }
+          echo "$DB_LIST" | sed 's/^/  /'
           echo ""
 
       # ============================================================
