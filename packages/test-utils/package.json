@@ -1,0 +1,15 @@
+{
+  "name": "@neighborhood-help/test-utils",
+  "version": "0.1.0",
+  "private": true,
+  "description": "邻里互助项目通用测试辅助工具（workspace 内部包）",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "files": ["src"],
+  "scripts": {
+    "type-check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4"
+  }
+}

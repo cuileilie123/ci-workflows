@@ -1,5 +1,5 @@
 <template>
-  <view class="profile-page">
+  <scroll-view class="profile-page" scroll-y>
     <!-- 用户信息头部 -->
     <view class="header">
       <view class="avatar-wrap" @click="onAvatarClick">
@@ -8,118 +8,126 @@
       </view>
       <view class="user-info">
         <text class="nickname">{{ user?.nickname || '未设置昵称' }}</text>
-        <text v-if="false" class="bio"></text>
-      </view>
-    </view>
-
-    <!-- 信用分卡片 -->
-    <view class="credit-card" :style="{ background: creditBg }">
-      <view class="credit-left">
-        <view class="credit-ring">
-          <view class="ring-bg" :style="ringStyle">
-            <text class="credit-score">{{ credit.score }}</text>
-          </view>
-        </view>
-      </view>
-      <view class="credit-right">
-        <text class="credit-level">{{ creditLabel }}</text>
-        <text class="credit-desc">{{ creditDesc }}</text>
-        <view class="privileges">
-          <text v-for="(p, i) in creditPrivileges" :key="i" class="privilege-tag">{{ p }}</text>
+        <view class="credit-row">
+          <text class="credit-label">信用分</text>
+          <text class="credit-score-text">{{ credit.score }}</text>
         </view>
       </view>
     </view>
 
-    <!-- 统计信息 -->
-    <view class="stats-row">
-      <view class="stat-item" @click="goTasks('published')">
-        <text class="stat-num">{{ stats.published }}</text>
-        <text class="stat-label">发布</text>
+    <!-- 认证状态卡片（未全部完成时显示） -->
+    <view v-if="!verification.canUseCoreFeatures" class="verify-card" @click="goVerification">
+      <view class="verify-head">
+        <text class="verify-icon">🛡️</text>
+        <view class="verify-info">
+          <text class="verify-title">完成认证以使用全部功能</text>
+          <text class="verify-desc">发布任务、接单、提现需完成认证</text>
+        </view>
+        <text class="verify-arrow">›</text>
       </view>
-      <view class="stat-item" @click="goTasks('accepted')">
-        <text class="stat-num">{{ stats.accepted }}</text>
-        <text class="stat-label">接单</text>
-      </view>
-      <view class="stat-item">
-        <text class="stat-num">{{ credit.totalReviews }}</text>
-        <text class="stat-label">评价</text>
-      </view>
-      <view class="stat-item">
-        <text class="stat-num">{{ credit.avgRating }}</text>
-        <text class="stat-label">均分</text>
+      <view class="verify-steps">
+        <view class="vs-item">
+          <text class="vs-dot" :class="{ done: verification.phoneBound }">{{ verification.phoneBound ? '✓' : '○' }}</text>
+          <text class="vs-label">手机号</text>
+        </view>
+        <view class="vs-item">
+          <text class="vs-dot" :class="{ done: verification.realNameVerified }">{{ verification.realNameVerified ? '✓' : '○' }}</text>
+          <text class="vs-label">实名</text>
+        </view>
+        <view class="vs-item">
+          <text class="vs-dot" :class="{ done: verification.bankCardBound }">{{ verification.bankCardBound ? '✓' : '○' }}</text>
+          <text class="vs-label">银行卡</text>
+        </view>
       </view>
     </view>
 
-    <!-- 评价分布 -->
-    <view v-if="credit.totalReviews > 0" class="distribution-card">
-      <text class="card-title">评分分布</text>
-      <view class="distribution-list">
-        <view v-for="star in 5" :key="star" class="dist-row">
-          <text class="dist-label">{{ star }}星</text>
-          <view class="dist-bar-bg">
-            <view
-              class="dist-bar"
-              :style="{ width: getBarWidth(star) + '%', background: '#ffc107' }"
-            />
-          </view>
-          <text class="dist-count">{{ credit.distribution[star] || 0 }}</text>
-        </view>
+    <!-- 钱包卡片 -->
+    <view class="wallet-card" @click="goWallet">
+      <view class="wallet-row">
+        <text class="label">可用余额</text>
+        <text class="amount">¥{{ balance.available.toFixed(2) }}</text>
       </view>
-      <!-- 评价列表 -->
-      <text class="card-title" style="margin-top: 24rpx;">全部评价</text>
-      <view v-for="r in reviews" :key="r.id" class="review-item">
-        <view class="reviewer-row">
-          <image
-            v-if="r.reviewer.avatar"
-            :src="r.reviewer.avatar"
-            class="reviewer-avatar"
-            mode="aspectFill"
-          />
-          <view v-else class="reviewer-avatar avatar-placeholder-sm">
-            {{ r.reviewer.nickname?.[0] || 'U' }}
-          </view>
-          <text class="reviewer-name">{{ r.reviewer.nickname }}</text>
-          <text class="review-time">{{ formatTime(r.createdAt) }}</text>
-        </view>
-        <view class="review-rating">
-          <text
-            v-for="i in 5"
-            :key="i"
-            class="mini-star"
-            :class="{ active: i <= r.rating }"
-          >★</text>
-        </view>
-        <text v-if="r.comment" class="review-comment">{{ r.comment }}</text>
-        <view v-if="r.tags?.length" class="review-tags">
-          <text v-for="tag in r.tags" :key="tag" class="review-tag">{{ tag }}</text>
+      <view class="wallet-row">
+        <text class="label">冻结中</text>
+        <text class="frozen">¥{{ balance.frozen.toFixed(2) }}</text>
+      </view>
+      <button class="withdraw-btn" @click.stop="goWithdraw">提现</button>
+    </view>
+
+    <!-- 我的订单入口 -->
+    <view class="order-entries">
+      <!-- 我接的订单 -->
+      <view class="entries-section">
+        <view class="entries-header" @click="goOrderList('', 'helper')">
+          <text class="entries-title">🤝 我接的订单</text>
+          <text class="entries-subtitle">{{ helperOrderCount }}笔</text>
+          <text class="entries-arrow">›</text>
         </view>
       </view>
 
-      <view v-if="!hasMore" class="no-more">— 没有更多评价了 —</view>
-      <view v-else-if="reviews.length > 0" class="load-more" @click="loadMore">加载更多</view>
+      <view class="entries-divider" />
+
+      <!-- 我的发布任务 -->
+      <view class="entries-section">
+        <view class="entries-header" @click="goTaskList()">
+          <text class="entries-title">📝 我的发布任务</text>
+          <text class="entries-subtitle">{{ myTaskCount }}个</text>
+          <text class="entries-arrow">›</text>
+        </view>
+      </view>
     </view>
 
-    <!-- 暂无评价 -->
-    <view v-else class="empty-state">
-      <text class="empty-icon">📝</text>
-      <text class="empty-text">暂无评价，完成任务后可获得评价</text>
+    <!-- 财务设置直达入口（仅老板级账号可见，免进二级菜单） -->
+    <view v-if="perm.isBoss" class="finance-entry" @click="goFinanceSettings">
+      <text class="finance-icon">🏦</text>
+      <view class="finance-info">
+        <text class="finance-title">财务设置</text>
+        <text class="finance-desc">配置平台佣金收款账号（分账接收方）</text>
+      </view>
+      <text class="menu-arrow">›</text>
     </view>
 
-    <!-- 菜单 -->
-    <view class="menu-card">
-      <view class="menu-item" @click="goMyTasks">
-        <text class="menu-icon">📋</text>
-        <text class="menu-label">我的任务</text>
+    <!-- 中端管理入口（仅老板/拥有权限的工作人员可见） -->
+    <view v-if="perm.hasAnyAdminEntry" class="admin-entry" @click="goAdmin">
+      <text class="admin-icon">🛠️</text>
+      <view class="admin-info">
+        <text class="admin-title">中端管理</text>
+        <text class="admin-desc">{{ perm.isBoss ? '老板后台：分佣 / 改价 / 分类 / 权限' : '工作人员后台' }}</text>
+      </view>
+      <text class="menu-arrow">›</text>
+    </view>
+
+    <!-- 待确认改价提醒（仅发布者且有待确认改价时显示） -->
+    <view v-if="pendingPriceChanges.length" class="price-pending-card">
+      <view class="pp-head">
+        <text class="pp-title">待确认改价</text>
+        <text class="pp-count">{{ pendingPriceChanges.length }} 笔</text>
+      </view>
+      <view
+        v-for="item in pendingPriceChanges"
+        :key="item.id"
+        class="pp-item"
+        @click="goTaskDetail(item.taskId)"
+      >
+        <view class="pp-item-info">
+          <text class="pp-item-title">{{ item.taskTitle }}</text>
+          <text class="pp-item-meta">¥{{ item.oldPrice.toFixed(2) }} → ¥{{ item.newPrice.toFixed(2) }}</text>
+        </view>
+        <text class="pp-arrow">›</text>
+      </view>
+    </view>
+
+    <!-- 设置入口 -->
+    <view class="settings">
+      <view class="menu-item" @click="goVerification">
+        <text class="menu-icon">🛡️</text>
+        <text class="menu-label">认证中心</text>
+        <text v-if="!verification.canUseCoreFeatures" class="menu-badge">待完善</text>
         <text class="menu-arrow">›</text>
       </view>
-      <view class="menu-item" @click="goMyOrders">
-        <text class="menu-icon">💰</text>
-        <text class="menu-label">我的订单</text>
-        <text class="menu-arrow">›</text>
-      </view>
-      <view class="menu-item" @click="goWallet">
-        <text class="menu-icon">👛</text>
-        <text class="menu-label">我的钱包</text>
+      <view class="menu-item" @click="goReviews">
+        <text class="menu-icon">⭐</text>
+        <text class="menu-label">我的评价</text>
         <text class="menu-arrow">›</text>
       </view>
       <view class="menu-item" @click="goSettings">
@@ -127,18 +135,49 @@
         <text class="menu-label">设置</text>
         <text class="menu-arrow">›</text>
       </view>
+      <view class="menu-item" @click="goHelp">
+        <text class="menu-icon">❓</text>
+        <text class="menu-label">帮助中心</text>
+        <text class="menu-arrow">›</text>
+      </view>
+      <view class="menu-item" @click="goChat">
+        <text class="menu-icon">💬</text>
+        <text class="menu-label">联系客服</text>
+        <text class="menu-arrow">›</text>
+      </view>
+      <view class="menu-item" @click="goAbout">
+        <text class="menu-icon">ℹ️</text>
+        <text class="menu-label">关于</text>
+        <text class="menu-arrow">›</text>
+      </view>
+      <view class="menu-item logout" @click="handleLogout">
+        <text class="menu-icon">🚪</text>
+        <text class="menu-label">退出登录</text>
+      </view>
     </view>
-  </view>
+  </scroll-view>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed } from 'vue';
 import { onShow } from '@dcloudio/uni-app';
 import { useUserStore } from '@/store/user';
-import { reviewApi, type CreditDetail, type ReviewData } from '@/api/review';
+import { usePermissionStore } from '@/store/permission';
+import { reviewApi, type CreditDetail } from '@/api/review';
+import { walletApi, type WalletBalance } from '@/api/wallet';
+import { paymentApi } from '@/api/payment';
+import { taskApi } from '@/api/task';
+import { priceChangeApi } from '@/api/admin';
+import { chatApi } from '@/api/chat';
+import { verificationApi } from '@/api/verification';
+import { tracker, EVENTS } from '@/utils/track';
+import type { PendingPriceChange, VerificationStatus } from '@/types';
 
 const userStore = useUserStore();
 const user = computed(() => userStore.userInfo);
+const perm = usePermissionStore();
+
+const pendingPriceChanges = ref<PendingPriceChange[]>([]);
 
 const credit = ref<CreditDetail>({
   score: 100,
@@ -149,72 +188,44 @@ const credit = ref<CreditDetail>({
   completedCount: 0,
 });
 
-const reviews = ref<ReviewData[]>([]);
-const page = ref(1);
-const hasMore = ref(false);
-
-const stats = ref({ published: 0, accepted: 0 });
-
-// 初始占位
-const creditBg = computed(() => {
-  const s = credit.value.score;
-  if (s >= 150) return 'linear-gradient(135deg, #FFD700, #FFA000)';
-  if (s >= 100) return 'linear-gradient(135deg, #4CAF50, #2E7D32)';
-  if (s >= 60) return 'linear-gradient(135deg, #8BC34A, #689F38)';
-  return 'linear-gradient(135deg, #FF5722, #D84315)';
+const balance = ref<WalletBalance>({
+  id: '',
+  balance: 0,
+  frozen: 0,
+  available: 0,
 });
 
-const ringStyle = computed(() => {
-  const percent = Math.min(100, (credit.value.score / 200) * 100);
-  return {
-    background: `conic-gradient(#fff ${percent * 3.6}deg, rgba(255,255,255,0.3) 0deg)`,
-  };
-});
-
-const creditLabel = computed(() => {
-  const s = credit.value.score;
-  if (s >= 150) return '优秀 ⭐⭐⭐';
-  if (s >= 100) return '良好 ⭐⭐';
-  if (s >= 60) return '一般 ⭐';
-  return '受限 ⚠️';
-});
-
-const creditDesc = computed(() => {
-  const s = credit.value.score;
-  if (s >= 150) return '享受优先推荐、免押金等特权';
-  if (s >= 100) return '信用良好，正常接单';
-  if (s >= 60) return '可正常接单，注意维护信用';
-  return '信用受限，仅可发单';
-});
-
-const creditPrivileges = computed(() => {
-  const s = credit.value.score;
-  if (s >= 150) return ['优先推荐', '免押金', '专属客服'];
-  if (s >= 100) return ['正常接单', '信用评级良'];
-  if (s >= 60) return ['正常接单'];
-  return ['仅可发单'];
+const verification = ref<VerificationStatus>({
+  phoneBound: false,
+  bankCardBound: false,
+  realNameVerified: false,
+  phone: null,
+  realName: null,
+  bankCardCount: 0,
+  canUseCoreFeatures: false,
+  canWithdraw: false,
 });
 
 const initial = computed(() => user.value?.nickname?.[0] || 'U');
 
-function getBarWidth(star: number): number {
-  const total = credit.value.totalReviews || 1;
-  return ((credit.value.distribution[star] || 0) / total) * 100;
+// 订单相关
+const helperOrderCount = ref(0);
+const myTaskCount = ref(0);
+
+function goOrderList(status: string, role: 'publisher' | 'helper'): void {
+  const params = [`role=${role}`];
+  if (status) params.push(`status=${status}`);
+  if (role === 'helper') params.push('title=我接的订单');
+  uni.navigateTo({ url: `/pages/order/list?${params.join('&')}` });
 }
 
-function formatTime(isoStr: string): string {
-  const d = new Date(isoStr);
-  const now = new Date();
-  const diff = now.getTime() - d.getTime();
-  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-  if (days === 0) {
-    const pad = (n: number) => n.toString().padStart(2, '0');
-    return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  }
-  if (days < 30) return `${days}天前`;
-  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+function goTaskList(status?: string): void {
+  const params = ['role=publisher', 'title=我的发布任务'];
+  if (status) params.push(`status=${status}`);
+  uni.navigateTo({ url: `/pages/order/list?${params.join('&')}` });
 }
 
+// 加载数据
 async function loadCredit(): Promise<void> {
   const uid = user.value?.id;
   if (!uid) return;
@@ -225,62 +236,145 @@ async function loadCredit(): Promise<void> {
   }
 }
 
-async function loadReviews(reset = false): Promise<void> {
-  const uid = user.value?.id;
-  if (!uid) return;
-  if (reset) page.value = 1;
+async function loadBalance(): Promise<void> {
   try {
-    const result = await reviewApi.getUserReviews(uid, page.value);
-    if (reset) {
-      reviews.value = result.list;
-    } else {
-      reviews.value.push(...result.list);
-    }
-    hasMore.value = result.hasMore;
+    balance.value = await walletApi.getBalance();
   } catch {
-    // 忽略
+    // 使用默认值
   }
 }
 
-async function loadMore(): Promise<void> {
-  page.value++;
-  await loadReviews();
+async function loadVerification(): Promise<void> {
+  try {
+    verification.value = await verificationApi.getStatus();
+  } catch {
+    // 使用默认值
+  }
 }
 
-function goTasks(type: 'published' | 'accepted'): void {
-  uni.navigateTo({ url: `/pages/task/list?type=${type}` });
+async function loadOrders(): Promise<void> {
+  const uid = user.value?.id;
+  if (!uid) return;
+  try {
+    const ordersData = await paymentApi.getUserOrders();
+    helperOrderCount.value = ordersData.filter(o => o.publisherId !== uid).length;
+  } catch {
+    helperOrderCount.value = 0;
+  }
 }
 
-function goMyTasks(): void {
-  uni.navigateTo({ url: '/pages/task/list?mine=true' });
+async function loadMyTaskCount(): Promise<void> {
+  try {
+    const data = await taskApi.myTasks({ page: 1 });
+    myTaskCount.value = data.total || data.list?.length || 0;
+  } catch {
+    myTaskCount.value = 0;
+  }
 }
 
-function goMyOrders(): void {
-  uni.navigateTo({ url: '/pages/task/list?orders=true' });
-}
-
+// 路由跳转
 function goWallet(): void {
+  tracker.track(EVENTS.PAGE_VIEW, { page: 'wallet_entry' });
   uni.navigateTo({ url: '/pages/user/wallet' });
 }
 
+function goVerification(): void {
+  uni.navigateTo({ url: '/pages/user/verification' });
+}
+
+function goAdmin(): void {
+  uni.navigateTo({ url: '/pages/admin/index' });
+}
+
+function goFinanceSettings(): void {
+  uni.navigateTo({ url: '/pages/admin/finance-settings' });
+}
+
+function goTaskDetail(taskId: string): void {
+  uni.navigateTo({ url: `/pages/task/detail?id=${taskId}` });
+}
+
+async function loadPendingPriceChanges(): Promise<void> {
+  try {
+    pendingPriceChanges.value = await priceChangeApi.listPending();
+  } catch {
+    pendingPriceChanges.value = [];
+  }
+}
+
+function goWithdraw(): void {
+  uni.navigateTo({ url: '/pages/user/wallet' });
+}
+
+function goReviews(): void {
+  uni.navigateTo({ url: '/pages/user/reviews' });
+}
+
 function goSettings(): void {
-  uni.showToast({ title: '设置功能即将上线', icon: 'none' });
+  uni.navigateTo({ url: '/pages/user/settings' });
+}
+
+function goHelp(): void {
+  uni.showToast({ title: '帮助中心即将上线', icon: 'none' });
+}
+
+async function goChat(): Promise<void> {
+  uni.showLoading({ title: '正在连接客服...' });
+  try {
+    const cs = await chatApi.findCustomerService();
+    uni.hideLoading();
+    if (cs && cs.userId) {
+      uni.navigateTo({
+        url: `/pages/chat/chat?peerId=${cs.userId}&peerNickname=${encodeURIComponent(cs.nickname)}&peerAvatar=${encodeURIComponent(cs.avatar ?? '')}`,
+      });
+    } else {
+      uni.showToast({ title: '暂无在线客服，请稍后再试', icon: 'none' });
+    }
+  } catch (e) {
+    uni.hideLoading();
+    uni.showToast({ title: (e as Error).message || '连接客服失败', icon: 'none' });
+  }
+}
+
+function goAbout(): void {
+  uni.showToast({ title: '版本 v1.0.0', icon: 'none' });
+}
+
+function handleLogout(): void {
+  uni.showModal({
+    title: '提示',
+    content: '确定要退出登录吗？',
+    success: async (res) => {
+      if (res.confirm) {
+        await userStore.logout();
+        uni.reLaunch({ url: '/pages/index/index' });
+      }
+    },
+  });
 }
 
 function onAvatarClick(): void {
-  // TODO: 头像修改
+  uni.showToast({ title: '头像修改即将上线', icon: 'none' });
 }
 
-onMounted(async () => {
-  await userStore.fetchMe();
-  await loadCredit();
-  await loadReviews(true);
-});
+onShow(async (): Promise<void> => {
+  // 检查登录状态
+  if (!userStore.isLoggedIn) {
+    uni.showModal({
+      title: '提示',
+      content: '请先登录后再访问个人中心',
+      showCancel: false,
+      success: () => {
+        uni.reLaunch({ url: '/pages/auth/login' });
+      },
+    });
+    return;
+  }
 
-onShow(async () => {
+  tracker.track(EVENTS.PAGE_VIEW, { page: 'user_profile' });
   await userStore.fetchMe();
-  await loadCredit();
-  await loadReviews(true);
+  await perm.load().catch(() => undefined);
+  await Promise.all([loadCredit(), loadBalance(), loadVerification(), loadOrders(), loadMyTaskCount(), loadPendingPriceChanges()]);
 });
 </script>
 
@@ -288,6 +382,7 @@ onShow(async () => {
 .profile-page {
   min-height: 100vh;
   padding: 24rpx;
+  padding-bottom: calc(24rpx + env(safe-area-inset-bottom));
   background-color: #f5f5f5;
 }
 
@@ -322,19 +417,6 @@ onShow(async () => {
   font-weight: 600;
 }
 
-.avatar-placeholder-sm {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 56rpx;
-  height: 56rpx;
-  border-radius: 50%;
-  background-color: #4caf50;
-  color: #fff;
-  font-size: 28rpx;
-  font-weight: 600;
-}
-
 .user-info {
   flex: 1;
   display: flex;
@@ -348,282 +430,318 @@ onShow(async () => {
   color: #333;
 }
 
-.bio {
-  font-size: 26rpx;
+.credit-row {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.credit-label {
+  font-size: 24rpx;
   color: #888;
 }
 
-// Credit Card
-.credit-card {
-  display: flex;
-  align-items: center;
-  gap: 28rpx;
+.credit-score-text {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #4caf50;
+}
+
+// 认证状态卡片
+.verify-card {
   margin-top: 24rpx;
-  padding: 32rpx;
+  padding: 28rpx;
+  background: linear-gradient(135deg, #ff9800, #f57c00);
   border-radius: 20rpx;
   color: #fff;
 }
 
-.credit-left {
-  flex-shrink: 0;
-}
-
-.credit-ring {
-  width: 160rpx;
-  height: 160rpx;
-  border-radius: 50%;
-  background-color: rgba(255, 255, 255, 0.3);
-  padding: 10rpx;
+.verify-head {
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 20rpx;
 }
 
-.ring-bg {
-  width: 100%;
-  height: 100%;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.9);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.verify-icon {
+  font-size: 44rpx;
 }
 
-.credit-score {
-  font-size: 48rpx;
-  font-weight: 700;
-  color: #333;
-}
-
-.credit-right {
+.verify-info {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 8rpx;
+  gap: 4rpx;
 }
 
-.credit-level {
-  font-size: 34rpx;
+.verify-title {
+  font-size: 30rpx;
   font-weight: 600;
+  color: #fff;
 }
 
-.credit-desc {
+.verify-desc {
   font-size: 24rpx;
-  opacity: 0.9;
+  color: rgba(255, 255, 255, 0.85);
 }
 
-.privileges {
+.verify-arrow {
+  font-size: 36rpx;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.verify-steps {
   display: flex;
-  gap: 12rpx;
-  margin-top: 8rpx;
-}
-
-.privilege-tag {
-  font-size: 22rpx;
-  padding: 4rpx 16rpx;
-  background-color: rgba(255, 255, 255, 0.3);
-  border-radius: 20rpx;
-}
-
-// Stats
-.stats-row {
-  display: flex;
-  justify-content: space-around;
+  gap: 40rpx;
   margin-top: 24rpx;
-  padding: 28rpx 0;
-  background-color: #fff;
-  border-radius: 20rpx;
+  padding-top: 20rpx;
+  border-top: 1rpx solid rgba(255, 255, 255, 0.2);
 }
 
-.stat-item {
+.vs-item {
   display: flex;
-  flex-direction: column;
   align-items: center;
   gap: 8rpx;
 }
 
-.stat-num {
-  font-size: 40rpx;
-  font-weight: 700;
-  color: #333;
+.vs-dot {
+  font-size: 28rpx;
+  color: rgba(255, 255, 255, 0.6);
+
+  &.done {
+    color: #fff;
+  }
 }
 
-.stat-label {
+.vs-label {
   font-size: 24rpx;
-  color: #888;
+  color: rgba(255, 255, 255, 0.9);
 }
 
-// Distribution
-.distribution-card {
+// 钱包卡片
+.wallet-card {
   margin-top: 24rpx;
-  padding: 28rpx;
+  padding: 32rpx;
+  background: linear-gradient(135deg, #4caf50, #2e7d32);
+  border-radius: 20rpx;
+  color: #fff;
+}
+
+.wallet-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16rpx;
+
+  &:last-of-type {
+    margin-bottom: 24rpx;
+  }
+}
+
+.label {
+  font-size: 26rpx;
+  opacity: 0.85;
+}
+
+.amount {
+  font-size: 44rpx;
+  font-weight: 700;
+}
+
+.frozen {
+  font-size: 32rpx;
+}
+
+.withdraw-btn {
+  width: 100%;
+  padding: 20rpx 0;
+  background-color: rgba(255, 255, 255, 0.25);
+  border-radius: 30rpx;
+  border: none;
+  color: #fff;
+  font-size: 30rpx;
+  font-weight: 500;
+  margin: 0;
+  line-height: 1.5;
+
+  &::after {
+    border: none;
+  }
+}
+
+// 订单入口卡片
+.order-entries {
+  margin-top: 24rpx;
   background-color: #fff;
   border-radius: 20rpx;
+  overflow: hidden;
 }
 
-.card-title {
-  display: block;
+.entries-section {
+  padding: 0 28rpx;
+}
+
+.entries-divider {
+  height: 1rpx;
+  background-color: #f0f0f0;
+  margin: 0 28rpx;
+}
+
+.entries-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 24rpx 0;
+}
+
+.entries-title {
   font-size: 30rpx;
   font-weight: 600;
   color: #333;
-  margin-bottom: 20rpx;
 }
 
-.distribution-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12rpx;
-}
-
-.dist-row {
-  display: flex;
-  align-items: center;
-  gap: 16rpx;
-}
-
-.dist-label {
-  width: 80rpx;
-  font-size: 24rpx;
-  color: #666;
-}
-
-.dist-bar-bg {
-  flex: 1;
-  height: 16rpx;
-  background-color: #f0f0f0;
-  border-radius: 8rpx;
-  overflow: hidden;
-}
-
-.dist-bar {
-  height: 100%;
-  border-radius: 8rpx;
-  transition: width 0.5s;
-}
-
-.dist-count {
-  width: 60rpx;
-  text-align: right;
-  font-size: 24rpx;
-  color: #666;
-}
-
-// Review items
-.review-item {
-  padding: 24rpx 0;
-  border-bottom: 1rpx solid #f0f0f0;
-
-  &:last-child {
-    border-bottom: none;
-  }
-}
-
-.reviewer-row {
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-}
-
-.reviewer-avatar {
-  width: 56rpx;
-  height: 56rpx;
-  border-radius: 50%;
-  background-color: #e0e0e0;
-}
-
-.reviewer-name {
-  font-size: 28rpx;
-  font-weight: 500;
-  color: #333;
-  flex: 1;
-}
-
-.review-time {
+.entries-subtitle {
   font-size: 24rpx;
   color: #999;
+  margin: 0 12rpx;
+  flex: 1;
 }
 
-.review-rating {
-  display: flex;
-  gap: 4rpx;
-  margin-top: 8rpx;
-}
-
-.mini-star {
-  font-size: 24rpx;
-  color: #ddd;
-
-  &.active {
-    color: #ffc107;
-  }
-}
-
-.review-comment {
-  display: block;
-  margin-top: 12rpx;
-  font-size: 28rpx;
-  color: #555;
-  line-height: 1.6;
-}
-
-.review-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12rpx;
-  margin-top: 12rpx;
-}
-
-.review-tag {
-  font-size: 22rpx;
-  padding: 4rpx 16rpx;
-  background-color: #e8f5e9;
-  color: #4caf50;
-  border-radius: 20rpx;
-}
-
-.no-more {
-  display: block;
-  text-align: center;
-  font-size: 24rpx;
+.entries-arrow {
   color: #ccc;
-  margin-top: 24rpx;
+  font-size: 36rpx;
 }
 
-.load-more {
-  display: block;
-  text-align: center;
-  font-size: 28rpx;
-  color: #4caf50;
-  margin-top: 24rpx;
-}
-
-// Empty state
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 60rpx 0;
-  gap: 16rpx;
-  background-color: #fff;
-  border-radius: 20rpx;
-  margin-top: 24rpx;
-}
-
-.empty-icon {
-  font-size: 64rpx;
-}
-
-.empty-text {
-  font-size: 28rpx;
-  color: #999;
-}
-
-// Menu
-.menu-card {
+// 设置入口
+.settings {
   margin-top: 24rpx;
   background-color: #fff;
   border-radius: 20rpx;
   overflow: hidden;
+}
+
+// 财务设置直达入口
+.finance-entry {
+  margin-top: 24rpx;
+  padding: 28rpx;
+  background: linear-gradient(135deg, #ff9800, #f57c00);
+  border-radius: 20rpx;
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  color: #fff;
+}
+
+.finance-icon {
+  font-size: 44rpx;
+}
+
+.finance-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+
+.finance-title {
+  font-size: 32rpx;
+  font-weight: 600;
+  color: #fff;
+}
+
+.finance-desc {
+  font-size: 24rpx;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+// 中端管理入口
+.admin-entry {
+  margin-top: 24rpx;
+  padding: 28rpx;
+  background: linear-gradient(135deg, #5c6bc0, #3949ab);
+  border-radius: 20rpx;
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  color: #fff;
+}
+
+.admin-icon {
+  font-size: 44rpx;
+}
+
+.admin-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+
+.admin-title {
+  font-size: 32rpx;
+  font-weight: 600;
+  color: #fff;
+}
+
+.admin-desc {
+  font-size: 24rpx;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+// 待确认改价卡片
+.price-pending-card {
+  margin-top: 24rpx;
+  padding: 24rpx;
+  background-color: #fff;
+  border-radius: 20rpx;
+  border-left: 8rpx solid #ff9800;
+}
+
+.pp-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16rpx;
+}
+
+.pp-title {
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #333;
+}
+
+.pp-count {
+  font-size: 24rpx;
+  color: #ff9800;
+  font-weight: 600;
+}
+
+.pp-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16rpx 0;
+  border-top: 1rpx solid #f5f5f5;
+}
+
+.pp-item-info {
+  flex: 1;
+}
+
+.pp-item-title {
+  display: block;
+  font-size: 28rpx;
+  color: #333;
+  margin-bottom: 4rpx;
+}
+
+.pp-item-meta {
+  font-size: 24rpx;
+  color: #ff9800;
+}
+
+.pp-arrow {
+  color: #ccc;
+  font-size: 36rpx;
 }
 
 .menu-item {
@@ -636,6 +754,54 @@ onShow(async () => {
   &:last-child {
     border-bottom: none;
   }
+
+  &.logout {
+    .menu-label {
+      color: #f44336;
+    }
+  }
+}
+
+.menu-item.logout {
+  background: #f44336;
+  background: linear-gradient(135deg, #f44336, #d32f2f);
+  border-radius: 12rpx;
+  margin: 12rpx 28rpx;
+  box-shadow: 0 4rpx 12rpx rgba(244, 67, 54, 0.3);
+  position: relative;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.menu-item.logout::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  transition: left 0.5s;
+}
+
+.menu-item.logout:active::before,
+.menu-item.logout.pressed::before {
+  left: 100%;
+}
+
+/* 为触摸设备添加兼容性 */
+.menu-item.logout:active {
+  transform: scale(0.98);
+  transition: transform 0.1s;
+}
+
+.menu-item.logout .menu-label {
+  color: #fff;
+  font-weight: 600;
+}
+
+.menu-item.logout .menu-icon {
+  color: #fff;
 }
 
 .menu-icon {
@@ -651,5 +817,14 @@ onShow(async () => {
 .menu-arrow {
   color: #ccc;
   font-size: 36rpx;
+}
+
+.menu-badge {
+  font-size: 22rpx;
+  color: #fff;
+  background-color: #ff9800;
+  padding: 4rpx 16rpx;
+  border-radius: 16rpx;
+  margin-right: 8rpx;
 }
 </style>

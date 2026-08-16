@@ -1,0 +1,20 @@
+{
+  "rules": [
+    {
+      "action": "allow",
+      "page": "*"
+    },
+    {
+      "action": "disallow",
+      "page": "pages/auth/login"
+    },
+    {
+      "action": "disallow",
+      "page": "pages/user/settings"
+    },
+    {
+      "action": "disallow",
+      "page": "pages/user/wallet"
+    }
+  ]
+}

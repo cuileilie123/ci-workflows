@@ -1,13 +1,20 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { LockAlertService } from './lock-alert.service';
 import { RedisService, LockHandle, AcquireLockOptions } from './redis.service';
+import { createTestLogger } from '@neighborhood-help/test-utils';
+
+const log = createTestLogger('lock-alert.spec');
 
 describe('分布式锁告警与安全释放测试', () => {
   let redisService: RedisService;
   let lockAlert: LockAlertService;
+  let moduleRef: TestingModule;
 
   // Mock Redis client
   let mockClient: any;
+
+  // 跟踪所有获取的锁句柄，确保 afterEach 清理定时器
+  const acquiredHandles: LockHandle[] = [];
 
   beforeEach(async () => {
     mockClient = {
@@ -16,10 +23,10 @@ describe('分布式锁告警与安全释放测试', () => {
       del: jest.fn().mockResolvedValue(1),
       get: jest.fn().mockResolvedValue(null),
       on: jest.fn(),
-      quit: jest.fn(),
+      quit: jest.fn().mockResolvedValue('OK'),
     };
 
-    const module: TestingModule = await Test.createTestingModule({
+    moduleRef = await Test.createTestingModule({
       providers: [
         RedisService,
         {
@@ -34,17 +41,56 @@ describe('分布式锁告警与安全释放测试', () => {
       ],
     }).compile();
 
-    redisService = module.get<RedisService>(RedisService);
-    lockAlert = module.get<LockAlertService>(LockAlertService);
+    redisService = moduleRef.get<RedisService>(RedisService);
+    lockAlert = moduleRef.get<LockAlertService>(LockAlertService);
 
+    // 构造函数创建了真实 Redis 客户端，先断开它以防 socket 泄漏
+    const realClient = (redisService as any).client;
+    if (realClient && typeof realClient.disconnect === 'function') {
+      log('beforeEach: 断开构造函数创建的真实 Redis 连接');
+      realClient.disconnect();
+      log('beforeEach: 真实 Redis 连接已断开');
+    }
     // 替换内部 client 为 mock（通过直接赋值）
     (redisService as any).client = mockClient;
     (redisService as any).available = true;
+    log('beforeEach: 已替换为 mock Redis client，TestingModule 已编译');
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // 清理所有未释放的锁句柄，停止看门狗定时器
+    const handleCount = acquiredHandles.length;
+    log(`afterEach: 清理 ${handleCount} 个未释放的锁句柄（停止看门狗定时器）`);
+    for (const handle of acquiredHandles) {
+      try {
+        handle.stopWatchdog();
+      } catch {
+        // 已释放的句柄忽略
+      }
+    }
+    acquiredHandles.length = 0;
+    jest.useRealTimers();
+    // 先关闭模块（触发 onModuleDestroy），再清理 mocks
+    if (moduleRef) {
+      log('afterEach: 开始关闭 TestingModule（触发 onModuleDestroy）');
+      const t0 = Date.now();
+      await moduleRef.close();
+      log(`afterEach: TestingModule 已关闭，耗时 ${Date.now() - t0}ms（Redis mock quit 已调用）`);
+    }
     jest.clearAllMocks();
   });
+
+  /** 包装 acquireLock，自动跟踪句柄以便清理 */
+  async function acquireLock(
+    key: string,
+    value: string,
+    ttlSec: number,
+    options?: AcquireLockOptions,
+  ): Promise<LockHandle | null> {
+    const handle = await redisService.acquireLock(key, value, ttlSec, options);
+    if (handle) acquiredHandles.push(handle);
+    return handle;
+  }
 
   // ================ LockAlertService 测试 ================
   describe('LockAlertService 告警逻辑', () => {
@@ -70,7 +116,7 @@ describe('分布式锁告警与安全释放测试', () => {
     it('获取锁成功返回 LockHandle', async () => {
       mockClient.set.mockResolvedValue('OK');
 
-      const handle = await redisService.acquireLock('task:1', 'user:1', 10);
+      const handle = await acquireLock('task:1', 'user:1', 10);
 
       expect(handle).toBeInstanceOf(LockHandle);
       expect(handle).not.toBeNull();
@@ -85,7 +131,7 @@ describe('分布式锁告警与安全释放测试', () => {
     it('获取锁失败返回 null 并发送告警', async () => {
       mockClient.set.mockResolvedValue(null); // NX 失败
 
-      const handle = await redisService.acquireLock('task:1', 'user:1', 10);
+      const handle = await acquireLock('task:1', 'user:1', 10);
 
       expect(handle).toBeNull();
       expect(lockAlert.onLockAcquireFailed).toHaveBeenCalledWith(
@@ -98,7 +144,7 @@ describe('分布式锁告警与安全释放测试', () => {
     it('Redis 不可用时 setNx 返回 false 但 acquireLock 不发送告警', async () => {
       (redisService as any).available = false;
 
-      const handle = await redisService.acquireLock('task:1', 'user:1', 10);
+      const handle = await acquireLock('task:1', 'user:1', 10);
 
       expect(handle).toBeNull();
       expect(lockAlert.onLockAcquireFailed).not.toHaveBeenCalled();
@@ -112,7 +158,7 @@ describe('分布式锁告警与安全释放测试', () => {
         context: '测试上下文',
         enableWatchdog: true,
       };
-      const handle = await redisService.acquireLock('task:1', 'user:1', 10, opts);
+      const handle = await acquireLock('task:1', 'user:1', 10, opts);
 
       expect(handle).not.toBeNull();
       expect(handle!.getKey()).toBe('task:1');
@@ -125,7 +171,7 @@ describe('分布式锁告警与安全释放测试', () => {
       mockClient.set.mockResolvedValue('OK');
       mockClient.eval.mockResolvedValue(1);
 
-      const handle = await redisService.acquireLock('task:1', 'user:1', 10);
+      const handle = await acquireLock('task:1', 'user:1', 10);
       expect(handle).not.toBeNull();
 
       const result = await handle!.release();
@@ -144,7 +190,7 @@ describe('分布式锁告警与安全释放测试', () => {
       mockClient.set.mockResolvedValue('OK');
       mockClient.eval.mockResolvedValue(0); // value 不匹配
 
-      const handle = await redisService.acquireLock('task:1', 'user:1', 10);
+      const handle = await acquireLock('task:1', 'user:1', 10);
       expect(handle).not.toBeNull();
 
       const result = await handle!.release();
@@ -164,7 +210,7 @@ describe('分布式锁告警与安全释放测试', () => {
       mockClient.eval.mockResolvedValue(1);
 
       jest.useFakeTimers();
-      const handle = await redisService.acquireLock('task:1', 'user:1', 10);
+      const handle = await acquireLock('task:1', 'user:1', 10);
       expect(handle).not.toBeNull();
 
       const watchdogSpy = jest.spyOn(handle!, 'stopWatchdog');
@@ -181,7 +227,7 @@ describe('分布式锁告警与安全释放测试', () => {
       mockClient.set.mockResolvedValue('OK');
       mockClient.eval.mockResolvedValue(1);
 
-      const handle = await redisService.acquireLock('task:1', 'user:1', 10);
+      const handle = await acquireLock('task:1', 'user:1', 10);
       const result = await handle!.renew();
 
       expect(result).toBe(true);
@@ -199,7 +245,7 @@ describe('分布式锁告警与安全释放测试', () => {
       mockClient.set.mockResolvedValue('OK');
       mockClient.eval.mockResolvedValue(0);
 
-      const handle = await redisService.acquireLock('task:1', 'user:1', 10);
+      const handle = await acquireLock('task:1', 'user:1', 10);
       const result = await handle!.renew();
 
       expect(result).toBe(false);
@@ -213,7 +259,7 @@ describe('分布式锁告警与安全释放测试', () => {
       mockClient.set.mockResolvedValue('OK');
       mockClient.eval.mockResolvedValue(1);
 
-      const handle = await redisService.acquireLock('task:1', 'user:1', 10, {
+      const handle = await acquireLock('task:1', 'user:1', 10, {
         alertThresholdMs: 30000,
         enableWatchdog: true,
       });
@@ -239,7 +285,7 @@ describe('分布式锁告警与安全释放测试', () => {
       jest.useFakeTimers();
       mockClient.set.mockResolvedValue('OK');
 
-      const handle = await redisService.acquireLock('task:1', 'user:1', 10, {
+      const handle = await acquireLock('task:1', 'user:1', 10, {
         enableWatchdog: false,
       });
 
@@ -268,8 +314,8 @@ describe('分布式锁告警与安全释放测试', () => {
         },
       );
 
-      const handleA = await redisService.acquireLock('task:1', 'user:A', 10);
-      const handleB = await redisService.acquireLock('task:2', 'user:B', 10);
+      const handleA = await acquireLock('task:1', 'user:A', 10);
+      const handleB = await acquireLock('task:2', 'user:B', 10);
 
       expect(handleA).not.toBeNull();
       expect(handleB).not.toBeNull();
@@ -308,7 +354,7 @@ describe('分布式锁告警与安全释放测试', () => {
       jest.useFakeTimers();
       mockClient.set.mockResolvedValue('OK');
 
-      const handle = await redisService.acquireLock('task:1', 'user:1', 10);
+      const handle = await acquireLock('task:1', 'user:1', 10);
 
       jest.advanceTimersByTime(5000);
 

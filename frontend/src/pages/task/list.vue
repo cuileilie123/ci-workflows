@@ -114,6 +114,7 @@ import { onLoad, onPullDownRefresh, onReachBottom } from '@dcloudio/uni-app';
 import { taskApi } from '@/api';
 import { TASK_CATEGORY_LABELS } from '@/types';
 import type { TaskCategory, TaskListItem, TaskListResult } from '@/types';
+import { tracker, EVENTS } from '@/utils/track';
 
 // ---- 分类选项 ----
 interface CategoryOption {
@@ -154,6 +155,11 @@ let searchTimer: ReturnType<typeof setTimeout> | null = null;
 
 // ============ 生命周期 ============
 onLoad(() => {
+  // 埋点：页面访问
+  tracker.track(EVENTS.PAGE_VIEW, {
+    page: 'task_list',
+  });
+  
   loadHistory();
   initLocation();
 });
@@ -231,7 +237,14 @@ function onSearchInput(e: any): void {
 function onSearchConfirm(): void {
   if (searchTimer) clearTimeout(searchTimer);
   const kw = keyword.value.trim();
-  if (kw) addHistory(kw);
+  if (kw) {
+    // 埋点：搜索事件
+    tracker.track(EVENTS.SEARCH, {
+      keyword: kw,
+      page: 'task_list',
+    });
+    addHistory(kw);
+  }
   loadFirstPage();
 }
 
@@ -269,6 +282,14 @@ function clearHistory(): void {
 function onCategoryTap(key: '' | TaskCategory): void {
   if (selectedCategory.value === key) return;
   selectedCategory.value = key;
+  
+  // 埋点：分类筛选事件
+  tracker.track(EVENTS.SEARCH, {
+    category: key,
+    page: 'task_list',
+    action: 'filter_category',
+  });
+  
   loadFirstPage();
 }
 
@@ -322,13 +343,13 @@ async function fetchList(append: boolean): Promise<void> {
 
 // ============ 卡片点击 ============
 function onCardTap(item: TaskListItem): void {
-  // 详情页为 Task 005，暂未实现，先提示
-  uni.navigateTo({
-    url: `/pages/task/detail?id=${item.id}`,
-    fail: () => {
-      uni.showToast({ title: '详情页即将上线', icon: 'none' });
-    },
+  tracker.track(EVENTS.TASK_CLICK, {
+    taskId: item.id,
+    category: item.category,
+    price: parseFloat(item.price),
+    page: 'task_list',
   });
+  uni.navigateTo({ url: `/pages/task/detail?id=${item.id}` });
 }
 
 function goPublish(): void {

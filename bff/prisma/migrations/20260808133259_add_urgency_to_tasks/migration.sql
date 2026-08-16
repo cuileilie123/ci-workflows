@@ -1,0 +1,2 @@
+-- CreateTable
+ALTER TABLE `tasks` ADD COLUMN `urgency` VARCHAR(191) NOT NULL DEFAULT 'NORMAL';

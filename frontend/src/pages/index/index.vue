@@ -5,23 +5,6 @@
       <text class="subtitle">社区有偿互助平台</text>
     </view>
 
-    <view v-if="userStore.isLoggedIn" class="card user-card" @click="onProfile">
-      <image
-        v-if="userStore.avatar"
-        class="user-avatar"
-        :src="userStore.avatar"
-        mode="aspectFill"
-      />
-      <view v-else class="user-avatar placeholder">
-        <text class="placeholder-text">{{ userStore.nickname.slice(0, 1) || '邻' }}</text>
-      </view>
-      <view class="user-info">
-        <text class="user-name">{{ userStore.nickname }}</text>
-        <text class="user-meta">信用分：{{ userStore.userInfo?.creditScore ?? 100 }}</text>
-      </view>
-      <text class="user-arrow">›</text>
-    </view>
-
     <view class="card">
       <text class="card-title">快速开始</text>
       <view class="feature-list">
@@ -33,7 +16,9 @@
 
     <view class="action-row">
       <button class="action-btn nearby-btn" @click="onNearby">附近任务</button>
-      <button class="action-btn publish-btn" @click="onPublish">+ 发布任务</button>
+      <button class="action-btn publish-btn" @click="onPublish">
+        <text class="publish-icon">+</text> 发布任务
+      </button>
     </view>
 
     <view class="footer">
@@ -44,33 +29,42 @@
 
 <script setup lang="ts">
 import { useUserStore } from '@/store/user';
+import { tracker, EVENTS } from '@/utils/track';
+import { requireVerification } from '@/utils/verification';
+import { onLoad, onShow, onUnload } from '@dcloudio/uni-app';
 
 const userStore = useUserStore();
 
-async function onLogout(): Promise<void> {
-  await userStore.logout();
-  uni.reLaunch({ url: '/pages/auth/login' });
-}
+// 页面访问埋点
+onShow(() => {
+  tracker.track(EVENTS.APP_LAUNCH, { page: 'index' });
+});
 
-function onProfile(): void {
-  if (!userStore.isLoggedIn) {
-    uni.showToast({ title: '请先登录', icon: 'none' });
-    return;
-  }
-  uni.navigateTo({ url: '/pages/user/profile' });
-}
+// 页面停留时长埋点
+let cleanupPageView: (() => void) | null = null;
+onLoad(() => {
+  cleanupPageView = tracker.trackPageView('index');
+});
 
-function onPublish(): void {
+onUnload(() => {
+  cleanupPageView?.();
+  cleanupPageView = null;
+});
+
+async function onPublish(): Promise<void> {
   if (!userStore.isLoggedIn) {
     uni.showToast({ title: '请先登录', icon: 'none' });
     uni.reLaunch({ url: '/pages/auth/login' });
     return;
   }
+  // 前置校验：须完成手机号绑定、银行卡绑定、实名认证
+  const ok = await requireVerification('发布任务');
+  if (!ok) return;
   uni.navigateTo({ url: '/pages/task/publish' });
 }
 
 function onNearby(): void {
-  uni.navigateTo({ url: '/pages/task/list' });
+  uni.switchTab({ url: '/pages/task/list' });
 }
 </script>
 
@@ -106,56 +100,6 @@ function onNearby(): void {
   padding: 32rpx;
   margin-top: 40rpx;
   box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.08);
-}
-
-.user-card {
-  display: flex;
-  align-items: center;
-}
-
-.user-avatar {
-  width: 88rpx;
-  height: 88rpx;
-  border-radius: 50%;
-  flex-shrink: 0;
-
-  &.placeholder {
-    background-color: #4caf50;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-}
-
-.placeholder-text {
-  color: #fff;
-  font-size: 36rpx;
-  font-weight: bold;
-}
-
-.user-info {
-  flex: 1;
-  margin-left: 24rpx;
-  display: flex;
-  flex-direction: column;
-}
-
-.user-name {
-  font-size: 32rpx;
-  font-weight: bold;
-  color: #333;
-}
-
-.user-meta {
-  font-size: 24rpx;
-  color: #888;
-  margin-top: 8rpx;
-}
-
-.user-arrow {
-  font-size: 40rpx;
-  color: #ccc;
-  flex-shrink: 0;
 }
 
 .card-title {
@@ -224,7 +168,47 @@ function onNearby(): void {
 
 .publish-btn {
   flex: 1.4;
-  background-color: #4caf50;
+  background: #4caf50;
+  background: linear-gradient(135deg, #4caf50, #2e7d32);
   color: #fff;
+  box-shadow: 0 4rpx 12rpx rgba(76, 175, 80, 0.3);
+  position: relative;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.publish-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  transition: left 0.5s;
+}
+
+.publish-btn:active::before,
+.publish-btn.pressed::before {
+  left: 100%;
+}
+
+/* 为触摸设备添加兼容性 */
+.publish-btn:active {
+  transform: scale(0.98);
+  transition: transform 0.1s;
+}
+
+.publish-icon {
+  display: inline-block;
+  width: 44rpx;
+  height: 44rpx;
+  line-height: 44rpx;
+  text-align: center;
+  background-color: rgba(255, 255, 255, 0.2);
+  border-radius: 50%;
+  font-size: 24rpx;
+  margin-right: 12rpx;
+  font-weight: bold;
 }
 </style>

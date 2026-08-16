@@ -67,6 +67,13 @@ export const useUserStore = defineStore('user', () => {
     }
   }
 
+  /** Mock 登录（开发环境专用） */
+  function setMockLoginState(token: string, refreshToken: string, user: User): void {
+    setTokens(token, refreshToken);
+    userInfo.value = user;
+    loggedIn.value = true;
+  }
+
   return {
     userInfo,
     loggedIn,
@@ -78,5 +85,6 @@ export const useUserStore = defineStore('user', () => {
     logout,
     fetchMe,
     restore,
+    setMockLoginState,
   };
 });

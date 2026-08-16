@@ -1,4 +1,5 @@
 import { request } from '@/utils/request';
+import type { RefundRequestInfo } from '@/types';
 
 /** 支付参数（用于 wx.requestPayment） */
 export interface PayParams {
@@ -18,11 +19,23 @@ export interface CreateOrderResult {
 /** 订单状态查询结果 */
 export interface OrderQueryResult {
   id: string;
-  status: 'PENDING' | 'PAID' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED' | 'REFUNDED';
+  taskId: string;
+  status: 'PENDING' | 'PAID' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED' | 'REFUNDED' | 'REFUND_PENDING';
   totalAmount: string;
   paidAt: string | null;
   createdAt?: string;
   refundAmount?: string | null;
+  taskTitle?: string;
+  taskAddress?: string;
+  publisherId?: string;
+  helperId?: string;
+}
+
+/** 申请退款返回 */
+export interface RequestRefundResult {
+  success: boolean;
+  refundRequestId: string;
+  message: string;
 }
 
 export const paymentApi = {
@@ -42,7 +55,37 @@ export const paymentApi = {
     });
   },
 
-  /** 申请退款 */
+  /** 获取用户订单列表 */
+  getUserOrders(params?: { status?: string; page?: number; pageSize?: number }): Promise<OrderQueryResult[]> {
+    const query: string[] = [];
+    if (params?.status) query.push(`status=${params.status}`);
+    if (params?.page) query.push(`page=${params.page}`);
+    if (params?.pageSize) query.push(`pageSize=${params.pageSize}`);
+    const queryString = query.length > 0 ? `?${query.join('&')}` : '';
+    return request<OrderQueryResult[]>({
+      url: `/pay/user-orders${queryString}`,
+    });
+  },
+
+  /** 申请退款（24h 内原路退回到微信钱包/银行卡） */
+  requestRefund(orderId: string, reason?: string): Promise<RequestRefundResult> {
+    const data: Record<string, unknown> = {};
+    if (reason) data.reason = reason;
+    return request<RequestRefundResult>({
+      url: `/pay/request-refund/${orderId}`,
+      method: 'POST',
+      data,
+    });
+  },
+
+  /** 查询退款状态 */
+  getRefundStatus(orderId: string): Promise<RefundRequestInfo | null> {
+    return request<RefundRequestInfo | null>({
+      url: `/pay/refund-status/${orderId}`,
+    });
+  },
+
+  /** 申请退款（旧接口，保留兼容） */
   refund(orderId: string, amount: number, reason?: string): Promise<{ success: boolean }> {
     const data: Record<string, unknown> = { orderId, amount };
     if (reason) data.reason = reason;
@@ -50,6 +93,14 @@ export const paymentApi = {
       url: '/pay/refund',
       method: 'POST',
       data,
+    });
+  },
+
+  /** 取消待支付订单 */
+  cancelOrder(orderId: string): Promise<{ success: boolean }> {
+    return request<{ success: boolean }>({
+      url: `/pay/cancel/${orderId}`,
+      method: 'POST',
     });
   },
 };

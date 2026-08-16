@@ -15,6 +15,19 @@ function toWsUrl(httpUrl: string): string {
 
 const WS_BASE = toWsUrl(import.meta.env.VITE_API_BASE_URL as string);
 
+/** 小程序 app 实例上挂载的调试相关字段类型 */
+interface SocketDebugApp {
+  globalData?: {
+    __listenerCounts?: string;
+    getListenerCounts?: typeof getListenerCounts;
+    [key: string]: unknown;
+  };
+  __listenerCounts?: string;
+  getListenerCounts?: typeof getListenerCounts;
+  setSocketDebug?: (enabled: boolean) => void;
+  getConnectionStatus?: () => { connected: boolean; connecting: boolean };
+}
+
 // ---- 事件监听器注册 ----
 type Listener<T> = (data: T) => void;
 
@@ -42,7 +55,7 @@ function updateGlobalDebug(): void {
   try {
     const data = JSON.stringify(getListenerCounts());
     if (typeof getApp !== 'undefined') {
-      const app = getApp() as Record<string, any>;
+      const app = getApp() as SocketDebugApp | undefined;
       if (app) {
         if (app.globalData && typeof app.globalData === 'object') {
           app.globalData.__listenerCounts = data;
@@ -52,7 +65,9 @@ function updateGlobalDebug(): void {
         app.getListenerCounts = getListenerCounts;
       }
     }
-  } catch (_) { /* ignore */ }
+  } catch (error) {
+    console.warn('[socket-debug] 更新全局调试信息失败', error);
+  }
 }
 
 let debugEnabled = false;
@@ -292,4 +307,7 @@ try {
       });
     }
   }
-} catch (_) { /* ignore in non-miniprogram env */ }
+} catch (error) {
+  // 在非小程序环境下，getApp 可能不存在，这是正常的
+  // console.warn('[socket] 非小程序环境，跳过调试函数注册', error);
+}

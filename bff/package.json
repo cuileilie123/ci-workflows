@@ -13,17 +13,24 @@
     "test": "jest --config jest.config.ts",
     "test:watch": "jest --config jest.config.ts --watch",
     "test:cov": "jest --config jest.config.ts --coverage",
+    "test:e2e:profit-sharing": "ts-node --transpile-only test/scripts/profit-sharing-e2e.ts",
     "test:deadlock": "jest --config jest.config.ts --testPathPatterns=\"deadlock\" --verbose",
-    "test:e2e": "jest --config jest.integration.config.ts --runInBand --testTimeout=30000"
+    "test:e2e": "jest --config jest.integration.config.ts --runInBand --testTimeout=30000",
+    "test:finance": "node ../scripts/test-boss-finance-settings.cjs",
+    "cleanup:test-data": "node ../scripts/cleanup-test-data.cjs",
+    "cleanup:test-data:force": "node ../scripts/cleanup-test-data.cjs --confirm -y"
   },
   "dependencies": {
+    "@elastic/elasticsearch": "^8.0.0",
     "@nestjs/common": "^10.3.10",
     "@nestjs/config": "^3.2.3",
     "@nestjs/core": "^10.3.10",
+    "@nestjs/event-emitter": "^2.1.1",
     "@nestjs/jwt": "^11.0.2",
     "@nestjs/mongoose": "^11.0.4",
     "@nestjs/platform-express": "^10.3.10",
     "@nestjs/platform-socket.io": "^11.1.28",
+    "@nestjs/schedule": "^4.1.2",
     "@nestjs/swagger": "^7.4.0",
     "@nestjs/websockets": "^11.1.28",
     "@prisma/client": "^5.22.0",
@@ -35,6 +42,7 @@
     "mongoose": "^9.9.1",
     "multer": "^2.2.0",
     "ngeohash": "^0.6.4",
+    "prom-client": "^15.1.3",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
     "socket.io": "^4.8.3"
@@ -61,5 +69,8 @@
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.5.4"
+  },
+  "prisma": {
+    "seed": "ts-node prisma/seed.ts"
   }
 }

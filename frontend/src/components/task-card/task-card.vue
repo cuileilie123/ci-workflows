@@ -12,6 +12,7 @@
 
       <view class="meta">
         <text class="tag">{{ categoryLabel }}</text>
+        <text v-if="item.urgency" class="urgency-tag" :class="'urgency-' + item.urgency?.toLowerCase()">{{ urgencyLabel }}</text>
         <text v-if="distanceText" class="distance">{{ distanceText }}</text>
         <text v-if="item.address" class="addr">{{ item.address }}</text>
       </view>
@@ -53,6 +54,17 @@ const distanceText = computed(() => {
   if (d == null) return '';
   if (d < 1000) return `${d}m`;
   return `${(d / 1000).toFixed(1)}km`;
+});
+
+const urgencyLabel = computed(() => {
+  const urgency = props.item.urgency;
+  const labels: Record<string, string> = {
+    'LOW': '低',
+    'NORMAL': '一般',
+    'HIGH': '紧急',
+    'URGENT': '非常紧急'
+  };
+  return labels[urgency as string] || '';
 });
 
 const relativeTime = computed(() => formatRelative(props.item.createdAt));
@@ -144,6 +156,29 @@ function formatRelative(iso: string): string {
   background-color: #e8f5e9;
   padding: 4rpx 14rpx;
   border-radius: 20rpx;
+}
+
+.urgency-tag {
+  font-size: 22rpx;
+  color: #fff;
+  padding: 4rpx 14rpx;
+  border-radius: 20rpx;
+}
+
+.urgency-low {
+  background-color: #4CAF50;
+}
+
+.urgency-normal {
+  background-color: #2196F3;
+}
+
+.urgency-high {
+  background-color: #FF9800;
+}
+
+.urgency-urgent {
+  background-color: #F44336;
 }
 
 .distance {

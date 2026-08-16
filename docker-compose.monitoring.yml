@@ -1,0 +1,134 @@
+# ============================================================
+# 邻里互助平台 — 监控告警三件套
+# ============================================================
+# 使用方式：
+#   1. 启动主服务（mysql/redis/bff 等）：docker compose up -d
+#   2. 启动监控套件：               docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up -d prometheus alertmanager redis-exporter webhook-bridge
+#
+# 或仅启动监控（不包含业务栈）：
+#   docker compose -f docker-compose.monitoring.yml up -d
+#
+# 启动后访问：
+#   Prometheus: http://<host>:9090      (规则/图表/状态)
+#   AlertManager: http://<host>:9093    (告警状态/静默)
+#   Webhook Bridge 健康检查: http://<host>:8080/health
+#   BFF 指标: http://<host>:3000/metrics  (profit_share_total 等)
+#
+# 企业微信告警：修改 MONITOR_WECHAT_WEBHOOK_URL 环境变量
+# ============================================================
+
+services:
+  # ---- Prometheus（抓取指标 + 评估告警规则）----
+  prometheus:
+    image: prom/prometheus:v2.53.2
+    container_name: nh-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--no-verbose", "--tries=1", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    # 确保能通过 Docker 内部 DNS 解析 bff/alertmanager 容器
+    networks:
+      - nh-network
+
+  # ---- AlertManager（告警路由 + 去重 + 推送）----
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: nh-alertmanager
+    restart: unless-stopped
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      - '--data.retention=120h'
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--no-verbose", "--tries=1", "http://localhost:9093/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - nh-network
+
+  # ---- Redis Exporter（Redis 指标，被 alert_rules.yml 的 RedisDown 使用）----
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.62.0
+    container_name: nh-redis-exporter
+    restart: unless-stopped
+    ports:
+      - "9121:9121"
+    environment:
+      REDIS_ADDR: 'redis://nh-redis:6379'
+      # 如果 Redis 有密码，启用下一行
+      # REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    depends_on:
+      - redis
+    networks:
+      - nh-network
+
+  # ---- Webhook Bridge（AlertManager → Server酱 / Bark 消息桥）----
+  # 纯 Python 标准库，无需安装任何依赖。
+  # 支持两个推送通道，有哪个配哪个，互不干扰：
+  #   - Server酱 Turbo：推送到个人微信（https://sct.ftqq.com/）
+  #   - Bark：推送到 iOS 通知（https://bark.day.app/）
+  webhook-bridge:
+    image: python:3.12-alpine
+    container_name: nh-webhook-bridge
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./monitoring/webhook-bridge.py:/app/webhook-bridge.py:ro
+    command: ["python", "/app/webhook-bridge.py"]
+    environment:
+      # ====== Server酱 Turbo（推送到个人微信）======
+      # 申请地址: https://sct.ftqq.com/  → 登录 → 复制 SendKey
+      # 留空则不启用该通道
+      SERVERCHAN_SENDKEY: ${SERVERCHAN_SENDKEY:-}
+
+      # ====== Bark（推送到 iOS 通知）======
+      # 安装 Bark App 后复制 DeviceKey
+      # 留空则不启用该通道
+      BARK_DEVICE_KEY: ${BARK_DEVICE_KEY:-}
+      # 如果自建了 Bark 服务器，改这里；默认用官方 https://api.day.app
+      BARK_SERVER: ${BARK_SERVER:-https://api.day.app}
+
+      # 告警标题前缀（带环境标记，避免多环境告警混在一起）
+      ALERT_TITLE_PREFIX: ${MONITOR_ALERT_PREFIX:-[邻里互助生产环境]}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - nh-network
+
+volumes:
+  prometheus_data:
+  alertmanager_data:
+
+# 与 docker-compose.yml 主栈共享网络，使 prometheus 能解析 bff/redis 容器名
+networks:
+  nh-network:
+    name: neighborhood-help_default
+    external: true

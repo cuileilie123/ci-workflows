@@ -1,0 +1,7 @@
+# Elasticsearch 配置
+cluster.name: "nh-cluster"
+network.host: 0.0.0.0
+
+# IK 分词器配置
+# 需要手动安装插件: bin/elasticsearch-plugin install https://github.com/medcl/elasticsearch-analysis-ik/releases/download/v8.12.0/elasticsearch-analysis-ik-8.12.0.zip
+# 拼音插件: bin/elasticsearch-plugin install https://github.com/medcl/elasticsearch-analysis-pinyin/releases/download/v8.12.0/elasticsearch-analysis-pinyin-8.12.0.zip

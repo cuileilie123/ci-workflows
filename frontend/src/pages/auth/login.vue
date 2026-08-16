@@ -27,9 +27,44 @@
         />
       </view>
 
+      <!-- #ifdef H5 -->
+      <view class="debug-section">
+        <text class="debug-label">🛠 H5 调试模式</text>
+        <view class="row">
+          <input
+            class="nickname-input"
+            placeholder="粘贴微信开发者工具获取的 code"
+            placeholder-class="nickname-ph"
+            :value="h5Code"
+            @input="onH5CodeInput"
+          />
+        </view>
+        <text class="debug-hint">
+          在微信开发者工具 Console 执行：wx.login({ success: res => console.log(res.code) })
+        </text>
+      </view>
+      <!-- #endif -->
+
       <button class="login-btn" :disabled="loading" @click="onLogin">
         {{ loading ? '登录中...' : '微信一键登录' }}
       </button>
+
+      <!-- #ifdef H5 || MP-WEIXIN -->
+      <view class="dev-section">
+        <text class="dev-label">开发调试</text>
+        <view class="dev-btns">
+          <button class="dev-btn mock-btn" :disabled="loading" @click="onMockLogin()">
+            普通用户
+          </button>
+          <button class="dev-btn boss-btn" :disabled="loading" @click="onMockLogin('1')">
+            老板账号
+          </button>
+          <button class="dev-btn admin-btn" :disabled="loading" @click="onMockLogin('2')">
+            管理员
+          </button>
+        </view>
+      </view>
+      <!-- #endif -->
 
       <text class="tip">登录即代表同意《用户协议》与《隐私政策》</text>
     </view>
@@ -39,11 +74,13 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { useUserStore } from '@/store/user';
+import type { User } from '@/types';
 
 const userStore = useUserStore();
 const avatarUrl = ref('');
 const nickname = ref('');
 const loading = ref(false);
+const h5Code = ref('');
 
 interface ChooseAvatarEvent {
   detail: { avatarUrl: string };
@@ -59,29 +96,141 @@ function onNicknameBlur(e: any): void {
   nickname.value = value.trim();
 }
 
+// #ifdef H5
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function onH5CodeInput(e: any): void {
+  // H5 native InputEvent has target.value; MP-WEIXIN has detail.value
+  const value = e?.detail?.value ?? e?.target?.value ?? '';
+  h5Code.value = value.trim();
+}
+// #endif
+
 async function onLogin(): Promise<void> {
   if (loading.value) return;
   loading.value = true;
   try {
-    const { code } = await new Promise<UniApp.LoginRes>((resolve, reject) => {
-      uni.login({ provider: 'weixin', success: resolve, fail: reject });
-    });
-    if (!code) {
-      uni.showToast({ title: '获取登录凭证失败', icon: 'none' });
+    // #ifdef H5
+    // H5 mode: use pasted code directly
+    if (h5Code.value) {
+      await userStore.login(h5Code.value, {
+        nickname: nickname.value,
+        avatarUrl: avatarUrl.value,
+      });
+      uni.showToast({ title: '登录成功', icon: 'success' });
+      uni.reLaunch({ url: '/pages/index/index' });
       return;
     }
+    // #endif
+
+    // 获取微信登录code
+    let code: string;
+    try {
+      const loginRes = await new Promise<UniApp.LoginRes>((resolve, reject) => {
+        uni.login({
+          provider: 'weixin',
+          success: resolve,
+          fail: (err) => {
+            console.error('uni.login 失败:', err);
+            reject(err);
+          },
+        });
+      });
+      code = loginRes.code;
+      console.log('获取到微信登录code:', code ? `${code.slice(0, 10)}...` : 'null');
+    } catch (loginErr) {
+      console.error('获取微信code失败:', loginErr);
+      uni.showToast({
+        title: '获取登录凭证失败，请重试',
+        icon: 'none',
+        duration: 2000,
+      });
+      return;
+    }
+
+    if (!code) {
+      uni.showToast({
+        title: '获取登录凭证失败',
+        icon: 'none',
+        duration: 2000,
+      });
+      return;
+    }
+
+    // 调用登录接口
     await userStore.login(code, {
       nickname: nickname.value,
       avatarUrl: avatarUrl.value,
     });
+
     uni.showToast({ title: '登录成功', icon: 'success' });
     uni.reLaunch({ url: '/pages/index/index' });
-  } catch {
-    // request 拦截器已 Toast 错误信息，此处仅恢复按钮状态
+  } catch (err) {
+    const errorMsg = (err as Error)?.message || '登录失败';
+    console.error('登录失败:', err);
+    // request 拦截器已 Toast 错误信息，此处仅记录日志
+    uni.showToast({
+      title: errorMsg.includes('网络') ? '网络错误，请检查后端服务' : errorMsg,
+      icon: 'none',
+      duration: 3000,
+    });
   } finally {
     loading.value = false;
   }
 }
+
+// #ifdef H5 || MP-WEIXIN
+async function onMockLogin(userId?: string): Promise<void> {
+  if (loading.value) return;
+  loading.value = true;
+  try {
+    const requestData: Record<string, string> = {};
+    if (userId) {
+      requestData.userId = userId;
+    } else {
+      requestData.nickname = nickname.value || 'Mock用户';
+    }
+
+    const res = await new Promise<{ data: { code: number; data: { accessToken: string; refreshToken: string; user: { id: string; nickname: string; avatar?: string | null; role?: string } }; message?: string } }>((resolve, reject) => {
+      uni.request({
+        url: `${import.meta.env.VITE_API_BASE_URL}/auth/test-login`,
+        method: 'POST',
+        data: requestData,
+        header: { 'Content-Type': 'application/json' },
+        success: (r) => resolve(r as unknown as { data: { code: number; data: { accessToken: string; refreshToken: string; user: { id: string; nickname: string; avatar?: string | null; role?: string } }; message?: string } }),
+        fail: reject,
+      });
+    });
+    const body = res.data;
+    if (body.code === 0 && body.data?.accessToken && body.data?.refreshToken) {
+      const mockUser: User = {
+        id: body.data.user.id,
+        openid: '',
+        nickname: body.data.user.nickname,
+        avatar: body.data.user.avatar ?? null,
+        phone: null,
+        creditScore: 100,
+        role: body.data.user.role || 'USER',
+        status: 'ACTIVE',
+      };
+      userStore.setMockLoginState(
+        body.data.accessToken,
+        body.data.refreshToken,
+        mockUser,
+      );
+      const roleLabel = mockUser.role === 'BOSS' ? '老板' : mockUser.role === 'ADMIN' ? '管理员' : mockUser.role === 'STAFF' ? '员工' : '普通用户';
+      uni.showToast({ title: `${roleLabel}登录成功`, icon: 'success' });
+      uni.reLaunch({ url: '/pages/index/index' });
+    } else {
+      uni.showToast({ title: body.message || '登录失败', icon: 'none' });
+    }
+  } catch (e) {
+    console.error('Mock 登录失败:', e);
+    uni.showToast({ title: '网络错误，请确认后端已启动', icon: 'none', duration: 3000 });
+  } finally {
+    loading.value = false;
+  }
+}
+// #endif
 </script>
 
 <style lang="scss" scoped>
@@ -212,5 +361,101 @@ async function onLogin(): Promise<void> {
   font-size: 22rpx;
   color: #999;
   margin-top: 24rpx;
+}
+
+.debug-section {
+  margin-bottom: 32rpx;
+  padding: 24rpx;
+  background-color: #f1f8e9;
+  border-radius: 12rpx;
+  border-left: 4rpx solid #8bc34a;
+}
+
+.debug-label {
+  font-size: 26rpx;
+  font-weight: 600;
+  color: #558b2f;
+  margin-bottom: 12rpx;
+  display: block;
+}
+
+.debug-hint {
+  font-size: 22rpx;
+  color: #7cb342;
+  line-height: 1.5;
+  display: block;
+}
+
+.mock-btn {
+  background-color: #ff9800;
+  margin-top: 16rpx;
+
+  &[disabled] {
+    background-color: #ffcc80;
+  }
+}
+
+.dev-section {
+  margin-top: 32rpx;
+  padding: 24rpx;
+  background-color: #fff8e1;
+  border-radius: 16rpx;
+  border: 2rpx dashed #ffb74d;
+}
+
+.dev-label {
+  font-size: 24rpx;
+  color: #f57c00;
+  font-weight: 600;
+  display: block;
+  margin-bottom: 16rpx;
+  text-align: center;
+}
+
+.dev-btns {
+  display: flex;
+  gap: 16rpx;
+}
+
+.dev-btn {
+  flex: 1;
+  height: 72rpx;
+  line-height: 72rpx;
+  font-size: 26rpx;
+  border-radius: 12rpx;
+  margin: 0;
+  padding: 0;
+
+  &::after {
+    border: none;
+  }
+}
+
+.dev-btn.mock-btn {
+  background-color: #e0e0e0;
+  color: #424242;
+
+  &[disabled] {
+    background-color: #eeeeee;
+    color: #9e9e9e;
+  }
+}
+
+.dev-btn.boss-btn {
+  background-color: #ff6f00;
+  color: #fff;
+
+  &[disabled] {
+    background-color: #ffab40;
+  }
+}
+
+.dev-btn.admin-btn {
+  background-color: #1565c0;
+  color: #fff;
+
+  &[disabled] {
+    background-color: #64b5f6;
+  }
 }
 </style>

@@ -8,6 +8,7 @@ import {
   MaxLength,
   IsOptional,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateReviewDto {
@@ -40,8 +41,17 @@ export class CreateReviewDto {
 
 export class QueryReviewDto {
   @ApiPropertyOptional({ description: '页码' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
   page?: number;
 
   @ApiPropertyOptional({ description: '每页数量' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(100)
   limit?: number;
 }

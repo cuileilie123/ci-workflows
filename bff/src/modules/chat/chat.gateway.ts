@@ -16,6 +16,7 @@ import { RedisService } from '../../common/redis.service';
 import { ChatService } from './chat.service';
 import { SendMessageDto } from './dto/send-message.dto';
 import { MessageType } from './types/message.type';
+import { parseCorsOrigins } from '../../main';
 
 /**
  * 聊天 WebSocket 网关
@@ -23,10 +24,17 @@ import { MessageType } from './types/message.type';
  * - 多端互斥（新连接踢旧连接）
  * - 在线直推 / 离线入队
  * - 敏感词过滤（复用 SensitiveService.filter）
+ *
+ * CORS 白名单与 main.ts 保持一致（小程序 + 本地开发 + H5 正式域），
+ * 允许通过 CORS_ORIGINS 环境变量追加。
  */
 @WebSocketGateway({
   namespace: '/chat',
-  cors: { origin: 'https://servicewechat.com', credentials: true },
+  cors: {
+    origin: parseCorsOrigins(process.env.CORS_ORIGINS),
+    credentials: true,
+    methods: ['GET', 'POST'],
+  },
   pingInterval: 30000, // 30s 心跳
   pingTimeout: 90000, // 90s 超时断开
 })

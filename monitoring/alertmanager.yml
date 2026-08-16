@@ -6,10 +6,10 @@ route:
   group_wait: 30s
   group_interval: 5m
   repeat_interval: 4h
-  receiver: 'wechat-webhook'
+  receiver: 'push-bridge'
 
 receivers:
-  - name: 'wechat-webhook'
+  - name: 'push-bridge'
     webhook_configs:
-      - url: 'http://webhook-bridge:8080/wechat'
+      - url: 'http://webhook-bridge:8080/alert'
         send_resolved: true

@@ -10,6 +10,9 @@
     "build:bff": "pnpm --filter bff build",
     "lint": "pnpm -r run lint",
     "test": "pnpm -r run test",
+    "test-finance": "node scripts/test-boss-finance-settings.cjs",
+    "cleanup:test-data": "node scripts/cleanup-test-data.cjs",
+    "cleanup:test-data:force": "node scripts/cleanup-test-data.cjs --confirm -y",
     "infra:up": "docker compose up -d",
     "infra:down": "docker compose down"
   },

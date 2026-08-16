@@ -162,7 +162,9 @@ export const useChatStore = defineStore('chat', () => {
     if (isSocketConnected()) {
       await markConversationRead(convId);
     } else {
-      await chatApi.markRead(convId).catch(() => {});
+      await chatApi.markRead(convId).catch((error) => {
+        console.warn('[ChatStore] 标记已读失败', error);
+      });
     }
   }
 

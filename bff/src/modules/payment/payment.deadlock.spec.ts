@@ -3,7 +3,13 @@ import { ForbiddenException } from '@nestjs/common';
 import { PaymentService } from './payment.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { WxPayUtil } from './wx-pay.util';
+import { ProfitSharingService } from '../admin/profit-sharing/profit-sharing.service';
+import { FinanceSettingsService } from '../admin/finance-settings/finance-settings.service';
+import { MetricsService } from '../../common/metrics.service';
 import { Prisma } from '@prisma/client';
+import { createTestLogger } from '@neighborhood-help/test-utils';
+
+const log = createTestLogger('payment.deadlock');
 
 /**
  * PaymentService 并发死锁场景单元测试（纯 Mock，无需数据库）
@@ -19,6 +25,7 @@ describe('PaymentService - 并发死锁修复验证', () => {
   let service: PaymentService;
   let prisma: any;
   let wxPay: any;
+  let moduleRef: TestingModule | null = null;
 
   const defaultTask = {
     id: 100n,
@@ -31,6 +38,7 @@ describe('PaymentService - 并发死锁修复验证', () => {
 
   const defaultOrder = (overrides: Partial<any> = {}) => ({
     id: 1n,
+    orderNo: 'AB12345678',
     taskId: 100n,
     helperId: 2001n,
     totalAmount: new Prisma.Decimal(100),
@@ -163,15 +171,69 @@ describe('PaymentService - 并发死锁修复验证', () => {
   });
 
   const compileService = async () => {
-    const module: TestingModule = await Test.createTestingModule({
+    // 先关闭上一个 TestingModule，防止 DI 资源泄漏
+    if (moduleRef) {
+      log('compileService: 关闭上一个 TestingModule');
+      await moduleRef.close();
+      moduleRef = null;
+    }
+    log('compileService: 开始编译新 TestingModule');
+    const t0 = Date.now();
+    moduleRef = await Test.createTestingModule({
       providers: [
         PaymentService,
         { provide: PrismaService, useValue: prisma },
         { provide: WxPayUtil, useValue: wxPay },
+        {
+          provide: ProfitSharingService,
+          useValue: {
+            calculate: jest.fn().mockResolvedValue({
+              platformFee: 10,
+              wechatFee: 0.6,
+              helperAmount: 89.4,
+              ruleId: '1',
+              mode: 'FLAT',
+              platformRate: 0.1,
+              helperRate: 0.9,
+            }),
+          },
+        },
+        {
+          provide: FinanceSettingsService,
+          useValue: {
+            getActiveProfitSharingReceiver: jest.fn().mockResolvedValue({
+              enabled: false,
+              mchId: '',
+              name: '平台佣金账户',
+            }),
+            getActiveMainMchId: jest.fn().mockResolvedValue(''),
+            getActiveAppId: jest.fn().mockResolvedValue(''),
+            clearMainConfigCache: jest.fn(),
+          },
+        },
+        {
+          provide: MetricsService,
+          useValue: {
+            recordSuccess: jest.fn(),
+            recordFail: jest.fn(),
+            recordException: jest.fn(),
+          },
+        },
       ],
     }).compile();
-    return module.get<PaymentService>(PaymentService);
+    log(`compileService: TestingModule 编译完成，耗时 ${Date.now() - t0}ms`);
+    return moduleRef.get<PaymentService>(PaymentService);
   };
+
+  afterEach(async () => {
+    if (moduleRef) {
+      log('afterEach: 关闭 TestingModule');
+      const t0 = Date.now();
+      await moduleRef.close();
+      log(`afterEach: TestingModule 已关闭，耗时 ${Date.now() - t0}ms`);
+      moduleRef = null;
+    }
+  });
 
   // ================ 1. 基础：handleNotify 跨表更新顺序 order → task ================
   describe('handleNotify 跨表顺序验证', () => {

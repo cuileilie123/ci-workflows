@@ -1,0 +1,32 @@
+server:
+  port: 8080
+  read_timeout: 5s
+  write_timeout: 10s
+
+redis:
+  addr: localhost:6379
+  password: ""
+  db: 0
+  pool_size: 50
+
+rules:
+  rapid_action:
+    enabled: true
+    limit: 30
+    window: 60s
+  gps_jump:
+    enabled: true
+    max_distance_km: 200
+  ip_cluster:
+    enabled: true
+    limit: 10
+  new_account:
+    enabled: true
+    threshold_hours: 24
+  self_dealing:
+    enabled: true
+
+alert:
+  wechat_webhook_url: ""  # 企业微信 Webhook URL
+  smtp_addr: ""           # SMTP 服务器地址
+  email_to: []            # 邮件接收者列表

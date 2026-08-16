@@ -54,13 +54,7 @@ export class LockHandle {
     // 告警计时器：超过 alertThresholdMs 触发告警
     this.watchdogTimer = setTimeout(async () => {
       const heldMs = Date.now() - this.acquiredAt;
-      await this.lockAlert.onLockTimeout(
-        this.key,
-        this.value,
-        heldMs,
-        this.ttlSec,
-        this.context,
-      );
+      await this.lockAlert.onLockTimeout(this.key, this.value, heldMs, this.ttlSec, this.context);
     }, this.alertThresholdMs);
 
     // 自动续期：每 TTL/3 续期一次，防止长任务执行中锁过期
@@ -102,13 +96,7 @@ export class LockHandle {
   async renew(): Promise<boolean> {
     if (!this.redis) return false;
     try {
-      const res = await this.redis.eval(
-        RENEW_SCRIPT,
-        1,
-        this.key,
-        this.value,
-        this.ttlSec,
-      );
+      const res = await this.redis.eval(RENEW_SCRIPT, 1, this.key, this.value, this.ttlSec);
       return res === 1;
     } catch {
       return false;
@@ -122,12 +110,7 @@ export class LockHandle {
     this.stopWatchdog();
     if (!this.redis) return true; // Redis 不可用时跳过
     try {
-      const res = await this.redis.eval(
-        UNLOCK_SCRIPT,
-        1,
-        this.key,
-        this.value,
-      );
+      const res = await this.redis.eval(UNLOCK_SCRIPT, 1, this.key, this.value);
       return res === 1;
     } catch {
       return false;

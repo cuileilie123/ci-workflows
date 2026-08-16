@@ -10,6 +10,7 @@ import {
   Req,
   UseGuards,
   HttpCode,
+  ParseIntPipe,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiBody } from '@nestjs/swagger';
 import { Request } from 'express';
@@ -42,8 +43,15 @@ export class TaskController {
 
   // ---- 2. 附近任务列表 ----
   @ApiOperation({ summary: '附近任务列表（GeoHash + Redis 缓存）' })
-  @Get()
+  @Get('nearby')
   listNearby(@Query() query: QueryTaskDto) {
+    return this.taskService.listNearby(query);
+  }
+
+  // ---- 2b. 根路由也指向附近任务列表 ----
+  @ApiOperation({ summary: '附近任务列表（别名）' })
+  @Get()
+  listNearbyAlias(@Query() query: QueryTaskDto) {
     return this.taskService.listNearby(query);
   }
 
@@ -54,11 +62,23 @@ export class TaskController {
     return this.taskService.search(q, page ? Number(page) : 1);
   }
 
+  // ---- 3b. 我的发布任务列表 ----
+  @ApiOperation({ summary: '我的发布任务列表' })
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Get('my')
+  myTasks(@Query('status') status?: string, @Query('page') page?: string, @Req() req?: Request) {
+    return this.taskService.myTasks(this.userId(req!), {
+      status,
+      page: page ? Number(page) : 1,
+    });
+  }
+
   // ---- 4. 任务详情 ----
   @ApiOperation({ summary: '任务详情' })
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.taskService.findOne(id);
+  findOne(@Param('id', ParseIntPipe) id: number) {
+    return this.taskService.findOne(String(id));
   }
 
   // ---- 5. 更新任务（仅发布者） ----
@@ -81,14 +101,34 @@ export class TaskController {
     return this.taskService.cancel(this.userId(req), id);
   }
 
-  // ---- 7. 接单 ----
-  @ApiOperation({ summary: '接单（分布式锁 + 信用分校验）' })
+  // ---- 7. 报价接单 ----
+  @ApiOperation({ summary: '报价接单' })
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @Post(':id/accept')
   @HttpCode(200)
   accept(@Param('id') id: string, @Req() req: Request) {
     return this.taskService.accept(this.userId(req), id);
+  }
+
+  // ---- 7b. 发布者确认接单人 ----
+  @ApiOperation({ summary: '发布者确认接单人' })
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/confirm-bid/:orderId')
+  @HttpCode(200)
+  confirmBid(@Param('id') taskId: string, @Param('orderId') orderId: string, @Req() req: Request) {
+    return this.taskService.confirmBid(this.userId(req), taskId, orderId);
+  }
+
+  // ---- 7c. 发布者拒绝报价 ----
+  @ApiOperation({ summary: '发布者拒绝报价' })
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @Post(':id/reject-bid/:orderId')
+  @HttpCode(200)
+  rejectBid(@Param('id') taskId: string, @Param('orderId') orderId: string, @Req() req: Request) {
+    return this.taskService.rejectBid(this.userId(req), taskId, orderId);
   }
 
   // ---- 8. 开始服务 ----

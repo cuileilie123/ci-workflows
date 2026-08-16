@@ -92,7 +92,8 @@ export class LockAlertService {
     ttlSec: number,
     context?: string,
   ): Promise<void> {
-    const level: LockAlertLevel = heldMs > ttlSec * 1000 * 3 ? 'CRITICAL' : heldMs > ttlSec * 1000 * 2 ? 'ERROR' : 'WARNING';
+    const level: LockAlertLevel =
+      heldMs > ttlSec * 1000 * 3 ? 'CRITICAL' : heldMs > ttlSec * 1000 * 2 ? 'ERROR' : 'WARNING';
 
     await this.sendAlert({
       lockKey,

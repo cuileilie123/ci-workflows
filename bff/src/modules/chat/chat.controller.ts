@@ -97,6 +97,20 @@ export class ChatController {
     return this.uploadService.uploadImage(file);
   }
 
+  @ApiOperation({ summary: '查找在线客服（第一个 ADMIN 或 STAFF）' })
+  @Get('customer-service')
+  async getCustomerService() {
+    const cs = await this.chatService.findCustomerService();
+    if (!cs) {
+      return null;
+    }
+    return {
+      userId: cs.userId,
+      nickname: cs.nickname || '在线客服',
+      avatar: cs.avatar,
+    };
+  }
+
   @ApiOperation({ summary: '标记会话已读' })
   @Put('read/:convId')
   async markRead(@Param('convId') convId: string, @Req() req: Request) {

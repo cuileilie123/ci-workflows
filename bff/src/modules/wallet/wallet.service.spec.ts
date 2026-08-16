@@ -11,6 +11,7 @@ import { Prisma } from '@prisma/client';
 describe('WalletService', () => {
   let service: WalletService;
   let prisma: any;
+  let moduleRef: TestingModule;
 
   const defaultWalletRow = {
     id: 1n,
@@ -64,11 +65,15 @@ describe('WalletService', () => {
   };
 
   const compileService = async () => {
-    const module: TestingModule = await Test.createTestingModule({
+    moduleRef = await Test.createTestingModule({
       providers: [WalletService, { provide: PrismaService, useValue: prisma }],
     }).compile();
-    service = module.get<WalletService>(WalletService);
+    service = moduleRef.get<WalletService>(WalletService);
   };
+
+  afterEach(async () => {
+    if (moduleRef) await moduleRef.close();
+  });
 
   // ==================== recordTransaction ====================
   describe('recordTransaction', () => {
