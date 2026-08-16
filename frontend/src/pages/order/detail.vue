@@ -18,6 +18,8 @@
         <text class="status-icon">{{ statusIcon }}</text>
         <text class="status-text">{{ statusLabel }}</text>
         <text v-if="order.status === 'PENDING'" class="status-hint">请在 15 分钟内完成支付</text>
+        <text v-else-if="order.status === 'REFUND_PENDING'" class="status-hint">退款处理中，预计 24 小时内原路退回</text>
+        <text v-else-if="order.status === 'REFUNDED'" class="status-hint">退款已原路退回，请查收</text>
       </view>
 
       <!-- 任务信息 -->
@@ -103,10 +105,10 @@
 import { computed, ref, reactive } from 'vue';
 import { onLoad, onShow } from '@dcloudio/uni-app';
 import { paymentApi } from '@/api/payment';
-import { payForTask } from '@/utils/payment';
 import { taskApi } from '@/api/task';
+import { payForTask } from '@/utils/payment';
 import type { OrderQueryResult } from '@/api/payment';
-import type { Task } from '@/types';
+import { formatTime } from '@/utils/format';
 
 const order = ref<OrderQueryResult | null>(null);
 const loading = ref(false);
@@ -129,6 +131,7 @@ const statusConfig: Record<string, { label: string; bg: string; icon: string }> 
   COMPLETED: { label: '已完成', bg: 'linear-gradient(135deg, #8E8E93, #636366)', icon: '✓' },
   CANCELLED: { label: '已取消', bg: 'linear-gradient(135deg, #FF3B30, #D70015)', icon: '✕' },
   REFUNDED: { label: '已退款', bg: 'linear-gradient(135deg, #FF9500, #FF6B00)', icon: '↩️' },
+  REFUND_PENDING: { label: '退款处理中', bg: 'linear-gradient(135deg, #007AFF, #0056CC)', icon: '💰' },
 };
 
 const statusLabel = computed(() => statusConfig[order.value?.status ?? 'PENDING']?.label ?? '未知');
@@ -158,7 +161,10 @@ const actions = computed<ActionItem[]>(() => {
     list.push({ key: 'cancel', label: '取消订单', cls: 'btn-secondary' });
   } else if (s === 'PAID' || s === 'IN_PROGRESS') {
     list.push({ key: 'refund', label: '申请退款', cls: 'btn-danger' });
+  } else if (s === 'COMPLETED') {
+    list.push({ key: 'review', label: '去评价', cls: 'btn-primary' });
   }
+  // REFUND_PENDING / REFUNDED / CANCELLED 无操作按钮
 
   return list;
 });
@@ -182,13 +188,25 @@ async function loadOrder(): Promise<void> {
 // 加载任务信息
 async function loadTaskInfo(): Promise<void> {
   if (!order.value) return;
-  try {
-    // 尝试根据订单ID加载任务（订单ID即任务ID的关联需要后端支持）
-    // 这里简化处理，显示基本信息
+  // 优先使用后端返回的任务信息
+  if (order.value.taskTitle || order.value.taskAddress) {
+    taskInfo.title = order.value.taskTitle || '关联任务';
+    taskInfo.address = order.value.taskAddress || '—';
+    return;
+  }
+  // 无任务信息时，通过 taskApi 查询
+  if (order.value.taskId) {
+    try {
+      const task = await taskApi.detail(String(order.value.taskId));
+      taskInfo.title = task.title || '关联任务';
+      taskInfo.address = task.address || '—';
+    } catch {
+      taskInfo.title = '关联任务';
+      taskInfo.address = '—';
+    }
+  } else {
     taskInfo.title = '关联任务';
-    taskInfo.address = '点击查看任务详情';
-  } catch {
-    // 忽略
+    taskInfo.address = '—';
   }
 }
 
@@ -203,6 +221,7 @@ async function onAction(act: ActionItem): Promise<void> {
     pay: doPay,
     cancel: doCancel,
     refund: doRefund,
+    review: doReview,
   };
   const fn = map[act.key];
   if (!fn) return;
@@ -219,10 +238,9 @@ async function doPay(): Promise<void> {
   if (!order.value) return;
   paying.value = true;
   try {
-    // 实际应该使用 taskId 重新创建订单并支付
-    // 这里简化处理：使用现有 orderId 对应的 taskId
-    const taskIdStr = orderId; // 订单创建时 taskId 作为 order 的关联
-    const result = await payForTask(taskIdStr);
+    // 使用关联的 taskId 创建并发起支付（订单ID≠任务ID）
+    const taskIdStr = order.value.taskId ?? orderId;
+    const result = await payForTask(String(taskIdStr));
     if (result) {
       uni.showToast({ title: '支付成功', icon: 'success' });
       await loadOrder();
@@ -238,27 +256,46 @@ async function doPay(): Promise<void> {
 
 // 取消订单
 async function doCancel(): Promise<void> {
+  if (!order.value) return;
   const ok = await showConfirm('取消订单', '确定要取消该订单吗？');
   if (!ok) return;
-  // 取消订单逻辑（需要后端接口支持）
-  // 这里简化为前端提示
-  uni.showToast({ title: '已取消', icon: 'none' });
-  // 刷新状态
-  await loadOrder();
+  try {
+    await paymentApi.cancelOrder(order.value.id);
+    uni.showToast({ title: '已取消订单', icon: 'success' });
+    await loadOrder();
+  } catch (e) {
+    uni.showToast({ title: (e as Error).message || '取消失败', icon: 'none' });
+  }
 }
 
-// 申请退款
+// 申请退款（24h 内原路退回）
 async function doRefund(): Promise<void> {
   if (!order.value) return;
-  const ok = await showConfirm('申请退款', '确定要申请退款吗？退款将原路返回。');
+  const ok = await showConfirm(
+    '申请退款',
+    '确定要申请退款吗？已支付金额将在 24 小时内原路退回到您的微信钱包或银行卡。',
+  );
   if (!ok) return;
   try {
-    await paymentApi.refund(order.value.id, Number(order.value.totalAmount), '用户申请退款');
-    uni.showToast({ title: '退款申请成功', icon: 'success' });
+    const res = await paymentApi.requestRefund(order.value.id, '用户申请退款');
+    uni.showToast({ title: res.message || '退款申请已提交', icon: 'none' });
     await loadOrder();
   } catch (e) {
     uni.showToast({ title: (e as Error).message || '退款失败', icon: 'none' });
   }
+}
+
+// 去评价
+function doReview(): Promise<void> {
+  if (!order.value) return Promise.resolve();
+  // 跳转到评价页面，传递orderId和revieweeId（需要根据实际业务逻辑确定被评价者）
+  return new Promise((resolve) => {
+    uni.navigateTo({
+      url: `/pages/review/create?orderId=${order.value!.id}`,
+      success: () => resolve(),
+      fail: () => resolve()
+    });
+  });
 }
 
 // 确认弹窗
@@ -276,16 +313,9 @@ function showConfirm(title: string, content: string): Promise<boolean> {
 // 跳转任务详情
 function goToTask(): void {
   if (!order.value) return;
-  // 订单ID即为关联的任务ID
-  uni.navigateTo({ url: `/pages/task/detail?id=${order.value.id}` });
-}
-
-// 时间格式化
-function formatTime(isoStr: string | null | undefined): string {
-  if (!isoStr) return '-';
-  const d = new Date(isoStr);
-  const pad = (n: number) => n.toString().padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  // 使用 taskId 跳转任务详情（订单ID≠任务ID）
+  const tid = order.value.taskId ?? order.value.id;
+  uni.navigateTo({ url: `/pages/task/detail?id=${tid}` });
 }
 
 // 接收页面参数

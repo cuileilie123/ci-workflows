@@ -3,7 +3,7 @@
     <view class="form-card">
       <!-- 标题 -->
       <view class="field">
-        <text class="label">标题</text>
+        <view class="label"><text class="req">*</text><text class="label-text">标题</text></view>
         <input
           v-model="form.title"
           class="input"
@@ -18,7 +18,7 @@
 
       <!-- 分类 -->
       <view class="field">
-        <text class="label">分类</text>
+        <view class="label"><text class="req">*</text><text class="label-text">分类</text></view>
         <picker :range="categoryLabels" :value="categoryIndex" @change="onCategoryChange">
           <view class="picker">{{ categoryLabels[categoryIndex] }}</view>
         </picker>
@@ -26,7 +26,7 @@
 
       <!-- 描述 -->
       <view class="field">
-        <text class="label">描述</text>
+        <view class="label"><text class="req">*</text><text class="label-text">描述</text></view>
         <textarea
           v-model="form.description"
           class="textarea"
@@ -43,7 +43,7 @@
       <!-- 价格 -->
       <view class="field row-field">
         <view class="sub-field">
-          <text class="label">报酬（元）</text>
+          <view class="label"><text class="req">*</text><text class="label-text">报酬（元）</text></view>
           <input
             v-model="form.price"
             class="input"
@@ -56,7 +56,7 @@
           <text v-if="errors.price" class="err">{{ errors.price }}</text>
         </view>
         <view class="sub-field">
-          <text class="label">截止时间</text>
+          <view class="label"><text class="req">*</text><text class="label-text">截止时间</text></view>
           <view class="expire-chips">
             <view
               v-for="opt in expireOptions"
@@ -71,9 +71,26 @@
         </view>
       </view>
 
+      <!-- 紧急程度 -->
+      <view class="field">
+        <view class="label"><text class="req">*</text><text class="label-text">紧急程度</text></view>
+        <view class="urgency-chips">
+          <view
+            v-for="opt in urgencyOptions"
+            :key="opt.value"
+            class="chip"
+            :class="{ 'chip-active': form.urgency === opt.value }"
+            @tap="form.urgency = opt.value"
+          >
+            {{ opt.label }}
+          </view>
+        </view>
+        <text v-if="errors.urgency" class="err">{{ errors.urgency }}</text>
+      </view>
+
       <!-- 位置 -->
       <view class="field">
-        <text class="label">位置</text>
+        <view class="label"><text class="req">*</text><text class="label-text">位置</text></view>
         <view class="loc-picker" :class="{ 'input-err': errors.address }" @tap="onChooseLocation">
           <text v-if="form.address" class="loc-text">{{ form.address }}</text>
           <text v-else class="ph">点击选择地图位置</text>
@@ -82,9 +99,9 @@
         <text v-if="errors.address" class="err">{{ errors.address }}</text>
       </view>
 
-      <!-- 图片 -->
+      <!-- 图片（选填） -->
       <view class="field">
-        <text class="label">图片（最多 6 张）</text>
+        <view class="label"><text class="label-text">图片</text><text class="optional-tag">（选填，最多 6 张）</text></view>
         <view class="img-grid">
           <view v-for="(img, idx) in form.images" :key="idx" class="img-item">
             <image class="img" :src="img.url" mode="aspectFill" />
@@ -116,6 +133,11 @@ import { ref } from 'vue';
 import { taskApi, uploadImage } from '@/api';
 import { TASK_CATEGORY_LABELS } from '@/types';
 import type { TaskCategory } from '@/types';
+import { tracker, EVENTS } from '@/utils/track';
+import { subscribeOnTaskPublish } from '@/utils/subscribe';
+import { useUserStore } from '@/store/user';
+
+const userStore = useUserStore();
 
 interface ImageItem {
   url: string;
@@ -135,6 +157,12 @@ const expireOptions = [
   { label: '7天', value: 168 },
 ];
 
+const urgencyOptions = [
+  { label: '一般', value: 'NORMAL' },
+  { label: '紧急', value: 'HIGH' },
+  { label: '非常紧急', value: 'URGENT' },
+];
+
 const form = ref({
   title: '',
   description: '',
@@ -142,6 +170,7 @@ const form = ref({
   lat: 0,
   lng: 0,
   address: '',
+  urgency: 'NORMAL', // 紧急程度：LOW, NORMAL, HIGH, URGENT
   images: [] as ImageItem[],
 });
 const categoryIndex = ref(0);
@@ -170,6 +199,8 @@ function validateField(name: string): boolean {
     else if (!/^\d+(\.\d{1,2})?$/.test(form.value.price)) e.price = '最多两位小数';
   } else if (name === 'address') {
     if (!form.value.address) e.address = '请选择位置';
+  } else if (name === 'urgency') {
+    if (!form.value.urgency) e.urgency = '请选择紧急程度';
   }
   errors.value = { ...errors.value, ...e };
   if (!e[name as keyof typeof e]) {
@@ -185,7 +216,8 @@ function validateAll(): boolean {
   const ok2 = validateField('description');
   const ok3 = validateField('price');
   const ok4 = validateField('address');
-  return ok1 && ok2 && ok3 && ok4;
+  const ok5 = validateField('urgency');
+  return ok1 && ok2 && ok3 && ok4 && ok5;
 }
 
 // ---- 分类 ----
@@ -280,7 +312,7 @@ async function onSubmit(): Promise<void> {
   submitting.value = true;
   try {
     const expireAt = new Date(Date.now() + expireSel.value * 3600 * 1000).toISOString();
-    const task = await taskApi.create({
+    const { id: taskId } = await taskApi.create({
       title: form.value.title.trim(),
       category: categoryKeys[categoryIndex.value],
       description: form.value.description.trim(),
@@ -288,15 +320,33 @@ async function onSubmit(): Promise<void> {
       lat: form.value.lat,
       lng: form.value.lng,
       address: form.value.address,
+      urgency: form.value.urgency as 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT',
       images: form.value.images.map((i) => i.url),
       expireAt,
     });
+    
+    tracker.track(EVENTS.TASK_PUBLISH, {
+      taskId,
+      category: categoryKeys[categoryIndex.value],
+      price: Number(form.value.price),
+      userId: userStore.userInfo?.id,
+    });
+    
+    subscribeOnTaskPublish();
+    
     uni.showToast({ title: '发布成功', icon: 'success' });
     setTimeout(() => {
-      uni.redirectTo({ url: `/pages/index/index` });
+      uni.switchTab({ url: `/pages/index/index` });
     }, 800);
-    void task;
-  } catch {
+  } catch (err) {
+    // 埋点：任务发布失败
+    tracker.track(EVENTS.TASK_PUBLISH, {
+      category: categoryKeys[categoryIndex.value],
+      price: Number(form.value.price),
+      userId: userStore.userInfo?.id,
+      status: 'failed',
+      error: (err as Error)?.message || 'unknown',
+    });
     // request 拦截器已 Toast 错误
   } finally {
     submitting.value = false;
@@ -319,7 +369,7 @@ async function onSubmit(): Promise<void> {
 }
 
 .field {
-  padding: 20rpx 0;
+  padding: 24rpx 0;
   border-bottom: 1rpx solid #f0f0f0;
 }
 
@@ -328,29 +378,56 @@ async function onSubmit(): Promise<void> {
 }
 
 .label {
-  display: block;
-  font-size: 26rpx;
-  color: #888;
-  margin-bottom: 12rpx;
+  display: flex;
+  align-items: center;
+  font-size: 28rpx;
+  color: #333;
+  font-weight: 500;
+  margin-bottom: 16rpx;
+  line-height: 1.4;
+}
+
+.label-text {
+  font-size: 28rpx;
+  color: #333;
+  font-weight: 500;
+}
+
+.label .req {
+  color: #e53935;
+  margin-right: 6rpx;
+  font-weight: 600;
+  font-size: 28rpx;
+}
+
+.label .optional-tag {
+  font-size: 24rpx;
+  color: #999;
+  font-weight: 400;
+  margin-left: 4rpx;
 }
 
 .input,
 .textarea {
   width: 100%;
-  font-size: 30rpx;
-  padding: 16rpx 20rpx;
+  font-size: 32rpx;
+  line-height: 48rpx;
+  min-height: 88rpx;
+  padding: 20rpx 24rpx;
   background-color: #f7f7f7;
   border-radius: 12rpx;
   box-sizing: border-box;
+  color: #333;
 }
 
 .textarea {
-  min-height: 160rpx;
-  line-height: 1.6;
+  min-height: 200rpx;
+  line-height: 1.7;
 }
 
 .ph {
   color: #bbb;
+  font-size: 30rpx;
 }
 
 .input-err {
@@ -362,39 +439,49 @@ async function onSubmit(): Promise<void> {
   display: block;
   font-size: 24rpx;
   color: #e53935;
-  margin-top: 8rpx;
+  margin-top: 10rpx;
 }
 
 .picker {
-  font-size: 30rpx;
-  padding: 16rpx 20rpx;
+  font-size: 32rpx;
+  padding: 20rpx 24rpx;
+  min-height: 88rpx;
+  line-height: 48rpx;
   background-color: #f7f7f7;
   border-radius: 12rpx;
   color: #333;
+  box-sizing: border-box;
 }
 
 .row-field {
   display: flex;
   flex-direction: column;
-  gap: 8rpx;
+  gap: 16rpx;
 }
 
 .sub-field {
   flex: 1;
 }
 
+.urgency-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16rpx;
+}
+
 .expire-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 12rpx;
+  gap: 16rpx;
 }
 
 .chip {
-  padding: 10rpx 24rpx;
-  font-size: 26rpx;
+  padding: 14rpx 28rpx;
+  font-size: 28rpx;
   color: #666;
   background-color: #f0f0f0;
-  border-radius: 28rpx;
+  border-radius: 32rpx;
+  transition: all 0.2s ease;
 }
 
 .chip-active {
@@ -406,10 +493,13 @@ async function onSubmit(): Promise<void> {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 30rpx;
-  padding: 20rpx;
+  font-size: 32rpx;
+  padding: 24rpx;
+  min-height: 88rpx;
   background-color: #f7f7f7;
   border-radius: 12rpx;
+  box-sizing: border-box;
+  color: #333;
 }
 
 .loc-text {

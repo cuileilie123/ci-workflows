@@ -34,6 +34,10 @@ model User {
   sentReviews     Review[]  @relation("Reviewer")
   receivedReviews Review[]  @relation("Reviewee")
   orders          Order[]   @relation("HelperOrders")
+  staffPermissions StaffPermission[]
+  grantedPermissions StaffPermission[] @relation("Granter")
+  bankCards       BankCard[]
+  realNameVerification RealNameVerification?
 
   @@index([creditScore])
   @@index([role])
@@ -45,6 +49,9 @@ enum Role {
   USER
   HELPER
   ADMIN
+  SUPER_ADMIN
+  BOSS
+  STAFF
 }
 
 enum UserStatus {
@@ -65,7 +72,8 @@ model Task {
   lng         Decimal     @db.Decimal(10, 7)
   geohash     String      @db.VarChar(12)
   address     String      @db.VarChar(256)
-  category    TaskCategory
+  categoryId  BigInt      @map("category_id")
+  urgency     Urgency     @default(NORMAL)
   images      Json        @default("[]")
   status      TaskStatus  @default(OPEN)
   expireAt    DateTime    @map("expire_at")
@@ -74,20 +82,29 @@ model Task {
   updatedAt   DateTime    @updatedAt @map("updated_at")
   deletedAt   DateTime?   @map("deleted_at")
 
-  publisher User   @relation("Publisher", fields: [publisherId], references: [id])
-  helper    User?  @relation("Helper", fields: [helperId], references: [id])
-  order     Order?
+  publisher User         @relation("Publisher", fields: [publisherId], references: [id])
+  helper    User?        @relation("Helper", fields: [helperId], references: [id])
+  category  TaskCategory @relation(fields: [categoryId], references: [id])
+  orders    Order[]
+  priceModifications PriceModification[]
 
   @@index([geohash])
   @@index([status, expireAt])
   @@index([publisherId])
   @@index([helperId])
-  @@index([category, status])
-  @@index([category, status, createdAt(sort: Desc)])
+  @@index([categoryId, status])
+  @@index([categoryId, status, urgency, createdAt(sort: Desc)])
   @@map("tasks")
 }
 
-enum TaskCategory {
+enum Urgency {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum TaskCategoryLegacy {
   DELIVERY
   SHOPPING
   CLEANING
@@ -98,26 +115,78 @@ enum TaskCategory {
   OTHER
 }
 
+// ===== 任务类别（可配置） =====
+model TaskCategory {
+  id        BigInt   @id @default(autoincrement())
+  code      String   @unique @db.VarChar(32) // 唯一业务编码，如 DELIVERY
+  name      String   @db.VarChar(32) // 显示名称，如 跑腿送货
+  icon      String?  @db.VarChar(256) // 图标 URL
+  sort      Int      @default(0) // 排序，升序
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tasks              Task[]
+  profitSharingRules ProfitSharingRule[]
+
+  @@index([isActive, sort])
+  @@map("task_categories")
+}
+
+// ===== 分账规则 =====
+// 规则优先级：categoryId 精确匹配 > 全局默认 (categoryId IS NULL)
+// 生效条件：isActive = true 且 (validFrom IS NULL OR validFrom <= now) 且 (validTo IS NULL OR validTo > now)
+model ProfitSharingRule {
+  id            BigInt    @id @default(autoincrement())
+  name          String    @db.VarChar(64) // 规则名称
+  categoryId    BigInt?   @map("category_id") // 绑定的任务类别；空 = 全局默认规则
+  mode          String    @default("FLAT") @db.VarChar(10) @map("mode") // FLAT=单一比例, TIERED=分段抽佣
+  platformRate  Decimal   @db.Decimal(5, 4) @map("platform_rate") // 平台抽成比例（FLAT 模式使用），0.1000 = 10%
+  helperRate    Decimal   @db.Decimal(5, 4) @map("helper_rate") // 接单者分成比例（FLAT 模式使用），0.9000 = 90%
+  tiers         Json?     @map("tiers") // 分段抽佣配置 [{rangeStart, rangeEnd, platformRate}]（TIERED 模式使用）
+  minPlatformFee Decimal? @db.Decimal(10, 2) @map("min_platform_fee") // 最低平台抽成（元，FLAT 模式使用）
+  maxPlatformFee Decimal? @db.Decimal(10, 2) @map("max_platform_fee") // 最高平台抽成（元，FLAT 模式使用）
+  isActive      Boolean   @default(true) @map("is_active")
+  validFrom     DateTime? @map("valid_from")
+  validTo       DateTime? @map("valid_to")
+  priority      Int       @default(0) // 同条件下优先级大的先匹配
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  category TaskCategory? @relation(fields: [categoryId], references: [id])
+
+  @@index([categoryId, isActive])
+  @@index([isActive, priority(sort: Desc)])
+  @@map("profit_sharing_rules")
+}
+
 enum TaskStatus {
   OPEN
   ASSIGNED
   IN_PROGRESS
   COMPLETED
   CANCELLED
+  PRICE_PENDING
+  EXPIRED
 }
 
 // ===== 订单 =====
 model Order {
   id           BigInt      @id @default(autoincrement())
-  taskId       BigInt      @unique @map("task_id")
+  orderNo      String     @unique @db.VarChar(10) @map("order_no") // 订单号：2大写字母+8数字，便于中台检索
+  taskId       BigInt      @map("task_id")
   helperId     BigInt      @map("helper_id")
   totalAmount  Decimal     @db.Decimal(10, 2) @map("total_amount")
   platformFee  Decimal     @db.Decimal(10, 2) @map("platform_fee")
   status       OrderStatus @default(PENDING)
+  isSupplement Boolean     @default(false) @map("is_supplement")
   paidAt       DateTime?   @map("paid_at")
   completedAt  DateTime?   @map("completed_at")
   refundAmount Decimal?    @db.Decimal(10, 2) @map("refund_amount")
   refundReason String?     @db.VarChar(500) @map("refund_reason")
+  quoteExpiresAt DateTime? @map("quote_expires_at")
+  rejectedAt   DateTime?   @map("rejected_at")
+  rejectReason String?     @db.VarChar(500) @map("reject_reason")
   createdAt    DateTime    @default(now()) @map("created_at")
   updatedAt    DateTime    @updatedAt @map("updated_at")
 
@@ -125,21 +194,58 @@ model Order {
   helper       User          @relation("HelperOrders", fields: [helperId], references: [id])
   review       Review?
   transactions Transaction[]
+  refundRequest RefundRequest?
 
+  @@index([taskId])
   @@index([helperId])
   @@index([status])
   @@index([createdAt])
   @@index([status, createdAt(sort: Desc)])
+  @@index([helperId, status])
+  @@index([status, helperId])
+  @@index([isSupplement])
   @@map("orders")
 }
 
 enum OrderStatus {
+  BIDDING
   PENDING
   PAID
   IN_PROGRESS
   COMPLETED
   CANCELLED
   REFUNDED
+  REFUND_PENDING
+}
+
+enum RefundStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+// ===== 退款申请 =====
+model RefundRequest {
+  id          BigInt       @id @default(autoincrement())
+  orderId     BigInt       @unique @map("order_id")
+  userId      BigInt       @map("user_id")
+  amount      Decimal      @db.Decimal(10, 2)
+  reason      String?      @db.VarChar(500)
+  status      RefundStatus @default(PENDING)
+  refundId    String?      @db.VarChar(64) @map("refund_id")
+  requestedAt DateTime     @default(now()) @map("requested_at")
+  processedAt DateTime?    @map("processed_at")
+  failReason  String?      @db.VarChar(500) @map("fail_reason")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@index([status])
+  @@index([requestedAt])
+  @@index([userId])
+  @@map("refund_requests")
 }
 
 // ===== 钱包 =====
@@ -200,6 +306,7 @@ model Review {
 
   @@index([revieweeId])
   @@index([rating])
+  @@index([revieweeId, createdAt(sort: Desc)])
   @@map("reviews")
 }
 
@@ -218,6 +325,51 @@ model AuditLog {
   @@index([targetType, targetId])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+// ===== 工作人员权限（老板授权给工作人员的细粒度权限） =====
+model StaffPermission {
+  id          BigInt   @id @default(autoincrement())
+  userId      BigInt   @map("user_id")
+  permission  String   @db.VarChar(64) // PROFIT_SHARING_MANAGE | ORDER_PRICE_MANAGE | TASK_CATEGORY_MANAGE
+  grantedBy   BigInt?  @map("granted_by")
+  grantedAt   DateTime @default(now()) @map("granted_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user    User   @relation(fields: [userId], references: [id])
+  granter User?  @relation("Granter", fields: [grantedBy], references: [id])
+
+  @@unique([userId, permission])
+  @@index([userId])
+  @@index([permission])
+  @@map("staff_permissions")
+}
+
+// ===== 订单改价记录（工作人员修改订单价格，待发布者确认） =====
+model PriceModification {
+  id          BigInt                 @id @default(autoincrement())
+  taskId      BigInt                 @map("task_id")
+  staffId     BigInt                 @map("staff_id")
+  oldPrice    Decimal                @db.Decimal(10, 2) @map("old_price")
+  newPrice    Decimal                @db.Decimal(10, 2) @map("new_price")
+  reason      String?                @db.VarChar(500)
+  previousStatus TaskStatus          @map("previous_status")
+  status      PriceModificationStatus @default(PENDING)
+  confirmedAt DateTime?              @map("confirmed_at")
+  createdAt   DateTime               @default(now()) @map("created_at")
+  updatedAt   DateTime               @updatedAt @map("updated_at")
+
+  task Task @relation(fields: [taskId], references: [id])
+
+  @@index([taskId])
+  @@index([status])
+  @@map("price_modifications")
+}
+
+enum PriceModificationStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
 }
 
 // ===== 敏感词 =====
@@ -247,6 +399,35 @@ model Coupon {
   @@map("coupons")
 }
 
+// ===== 平台财务设置（单例：id=1，仅老板账号可编辑） =====
+// 收款账号配置保存后，微信支付回调触发分账时会从这里读取接收方，
+// 优先级高于 .env 里的 WX_PROFIT_SHARING_*（DB 未配置时才回落到 env）。
+model PlatformFinanceSetting {
+  id                     BigInt    @id @default(autoincrement())
+  // ---------- 平台佣金收款账号（分账接收方，独立商户号）----------
+  // 是否启用分账：开关，总控，关闭则不分账（钱留在主商户号）
+  profitSharingEnabled   Boolean   @default(true) @map("profit_sharing_enabled")
+  // 接收方类型：MERCHANT_ID = 微信支付商户号（推荐）；PERSONAL_OPENID = 个人零钱（需额外验证）
+  receiverType           String    @default("MERCHANT_ID") @map("receiver_type") @db.VarChar(20)
+  // 接收方商户号（receiverType=MERCHANT_ID 时必填，如 1600000000）
+  receiverMchId          String?   @map("receiver_mch_id") @db.VarChar(32)
+  // 接收方名称（微信商户平台登记的主体名称，如 XX 科技有限公司）
+  receiverName           String?   @map("receiver_name") @db.VarChar(128)
+  // 接收方个人 openid（receiverType=PERSONAL_OPENID 时必填）
+  receiverOpenid         String?   @map("receiver_openid") @db.VarChar(64)
+  // ---------- 主商户号（可选覆盖 env，方便老板配置，不必找运维改配置文件）----------
+  // 主商户号：如 1600000001；为空则回落到 env.WX_MCH_ID
+  mainMchId              String?   @map("main_mch_id") @db.VarChar(32)
+  // 小程序 AppID；为空则回落到 env.WX_APP_ID
+  mainAppId              String?   @map("main_app_id") @db.VarChar(32)
+  // ---------- 元数据 ----------
+  updatedBy              BigInt?   @map("updated_by")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
+  createdAt              DateTime  @default(now()) @map("created_at")
+
+  @@map("platform_finance_settings")
+}
+
 // ===== 客服工单 =====
 model Ticket {
   id           BigInt       @id @default(autoincrement())
@@ -272,4 +453,46 @@ enum TicketStatus {
   IN_PROGRESS
   RESOLVED
   CLOSED
+}
+
+// ===== 银行卡绑定 =====
+model BankCard {
+  id         BigInt   @id @default(autoincrement())
+  userId     BigInt   @map("user_id")
+  holderName String   @map("holder_name") @db.VarChar(32) // 持卡人姓名（须与实名认证一致）
+  bankName   String   @map("bank_name") @db.VarChar(64)   // 银行名称
+  cardNumber String   @map("card_number") @db.VarChar(32) // 卡号（完整存储，接口返回时脱敏）
+  lastFour   String   @map("last_four") @db.VarChar(4)    // 后四位（用于展示）
+  isDefault  Boolean  @default(false) @map("is_default")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@map("bank_cards")
+}
+
+// ===== 实名认证 =====
+model RealNameVerification {
+  id              BigInt           @id @default(autoincrement())
+  userId          BigInt           @unique @map("user_id")
+  realName        String           @map("real_name") @db.VarChar(32)
+  idCardNumber    String           @map("id_card_number") @db.VarChar(32) // 身份证号（完整存储，接口返回时脱敏）
+  idCardLastFour  String           @map("id_card_last_four") @db.VarChar(4)
+  status          RealNameStatus   @default(VERIFIED) // 提交并通过格式校验即视为 VERIFIED
+  submittedAt     DateTime         @default(now()) @map("submitted_at")
+  reviewedAt      DateTime?        @map("reviewed_at")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("real_name_verifications")
+}
+
+enum RealNameStatus {
+  PENDING
+  VERIFIED
+  REJECTED
 }

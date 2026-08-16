@@ -32,7 +32,7 @@
         <view class="conv-info">
           <view class="top-row">
             <text class="nickname">{{ conv.peerNickname }}</text>
-            <text v-if="conv.lastMessage" class="time">{{ formatTime(conv.lastMessage.createdAt) }}</text>
+            <text v-if="conv.lastMessage" class="time">{{ formatRelativeTime(conv.lastMessage.createdAt) }}</text>
           </view>
           <view class="bottom-row">
             <text class="last-msg" :class="{ 'unread-text': conv.unreadCount > 0 }">
@@ -51,6 +51,7 @@ import { computed, onMounted, ref } from 'vue';
 import { useChatStore } from '@/store/chat';
 import { useUserStore } from '@/store/user';
 import type { ConversationSummary } from '@/types/chat';
+import { formatRelativeTime } from '@/utils/format';
 
 const chatStore = useChatStore();
 const userStore = useUserStore();
@@ -104,20 +105,6 @@ function lastMsgPreview(conv: ConversationSummary): string {
     case 'SYSTEM': return '[系统消息]';
     default: return '';
   }
-}
-
-function formatTime(iso: string): string {
-  const d = new Date(iso);
-  const now = new Date();
-  const diff = now.getTime() - d.getTime();
-  const min = Math.floor(diff / 60000);
-  if (min < 1) return '刚刚';
-  if (min < 60) return `${min}分钟前`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}小时前`;
-  const day = Math.floor(hr / 24);
-  if (day < 7) return `${day}天前`;
-  return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
 function onTapConv(conv: ConversationSummary): void {

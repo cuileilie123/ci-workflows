@@ -3,6 +3,9 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { WalletService } from './wallet.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { Prisma } from '@prisma/client';
+import { createTestLogger } from '@neighborhood-help/test-utils';
+
+const log = createTestLogger('wallet.deadlock');
 
 /**
  * WalletService 并发死锁场景单元测试（纯 Mock，无需数据库）
@@ -16,6 +19,7 @@ import { Prisma } from '@prisma/client';
 describe('WalletService - 并发死锁修复验证', () => {
   let service: WalletService;
   let prisma: any;
+  let moduleRef: TestingModule | null = null;
 
   /** 生成钱包行（可指定 user_id 和 balance） */
   const walletRow = (userId: bigint, balance = 1000) => ({
@@ -100,11 +104,30 @@ describe('WalletService - 并发死锁修复验证', () => {
   };
 
   const compileService = async (mock: any) => {
-    const module: TestingModule = await Test.createTestingModule({
+    // 先关闭上一个 TestingModule，防止 DI 资源泄漏
+    if (moduleRef) {
+      log('compileService: 关闭上一个 TestingModule');
+      await moduleRef.close();
+      moduleRef = null;
+    }
+    log('compileService: 开始编译新 TestingModule');
+    const t0 = Date.now();
+    moduleRef = await Test.createTestingModule({
       providers: [WalletService, { provide: PrismaService, useValue: mock }],
     }).compile();
-    return module.get<WalletService>(WalletService);
+    log(`compileService: TestingModule 编译完成，耗时 ${Date.now() - t0}ms`);
+    return moduleRef.get<WalletService>(WalletService);
   };
+
+  afterEach(async () => {
+    if (moduleRef) {
+      log('afterEach: 关闭 TestingModule');
+      const t0 = Date.now();
+      await moduleRef.close();
+      log(`afterEach: TestingModule 已关闭，耗时 ${Date.now() - t0}ms`);
+      moduleRef = null;
+    }
+  });
 
   // ================ 1. 单次锁顺序验证（正向/反向转账） ================
   describe('锁排序基础验证', () => {

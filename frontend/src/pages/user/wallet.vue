@@ -21,6 +21,41 @@
       </view>
     </view>
 
+    <!-- 分佣比例（只读，结算提现时参考） -->
+    <view class="profit-card">
+      <view class="profit-head">
+        <text class="profit-title">分佣比例</text>
+        <text class="profit-tag">只读</text>
+      </view>
+      <view class="wechat-fee-row">
+        <text class="fee-label">微信支付渠道费率</text>
+        <text class="fee-value">{{ wechatFee.percent }}%</text>
+      </view>
+      <text class="fee-desc">{{ wechatFee.description }}</text>
+      <view class="profit-divider"></view>
+      <view v-if="activeRules.length" class="rule-list">
+        <view v-for="rule in activeRules" :key="rule.id" class="rule-item">
+          <view class="rule-head-row">
+            <text class="rule-name">{{ rule.name }}</text>
+            <text class="rule-cat">{{ rule.categoryName || '全局默认' }}</text>
+          </view>
+          <view class="rule-rate-row">
+            <view class="rate-cell">
+              <text class="rate-label">平台</text>
+              <text class="rate-value">{{ (rule.platformRate * 100).toFixed(2) }}%</text>
+            </view>
+            <view class="rate-cell">
+              <text class="rate-label">接单者</text>
+              <text class="rate-value helper">{{ (rule.helperRate * 100).toFixed(2) }}%</text>
+            </view>
+          </view>
+        </view>
+      </view>
+      <view v-else class="rule-empty">
+        <text class="rule-empty-text">暂无生效中的分账规则</text>
+      </view>
+    </view>
+
     <!-- Tab 切换 -->
     <view class="tabs">
       <view
@@ -35,7 +70,7 @@
     </view>
 
     <!-- 流水列表 -->
-    <view class="transaction-list" v-if="filteredTransactions.length > 0">
+    <view v-if="filteredTransactions.length > 0" class="transaction-list">
       <view
         v-for="tx in filteredTransactions"
         :key="tx.id"
@@ -46,7 +81,7 @@
         </view>
         <view class="tx-info">
           <text class="tx-desc">{{ tx.description }}</text>
-          <text class="tx-time">{{ formatTime(tx.createdAt) }}</text>
+          <text class="tx-time">{{ formatRelativeTime(tx.createdAt) }}</text>
         </view>
         <view class="tx-amount" :class="getAmountClass(tx.type)">
           <text>{{ getAmountDisplay(tx) }}</text>
@@ -88,7 +123,7 @@
               />
             </view>
             <text class="form-hint">单笔提现最低 1 元，最高 5000 元</text>
-            <text class="form-hint" v-if="Number(withdrawAmount) > 1000">
+            <text v-if="Number(withdrawAmount) > 1000" class="form-hint">
               大额提现（>1000元）需人工审核
             </text>
           </view>
@@ -117,6 +152,11 @@
 import { ref, computed, onMounted } from 'vue';
 import { onShow } from '@dcloudio/uni-app';
 import { walletApi, type WalletBalance, type Transaction } from '@/api/wallet';
+import { profitSharingUserApi } from '@/api/admin';
+import { tracker, EVENTS } from '@/utils/track';
+import { requireVerification } from '@/utils/verification';
+import { formatRelativeTime } from '@/utils/format';
+import type { ActiveProfitSharingRule, WechatFeeRate } from '@/types';
 
 const balance = ref<WalletBalance>({
   id: '',
@@ -145,6 +185,13 @@ const showWithdrawModal = ref(false);
 const withdrawAmount = ref('');
 const withdrawing = ref(false);
 
+const activeRules = ref<ActiveProfitSharingRule[]>([]);
+const wechatFee = ref<WechatFeeRate>({
+  rate: 0.006,
+  percent: 0.6,
+  description: '微信支付渠道手续费',
+});
+
 const canWithdraw = computed(() => {
   const amount = Number(withdrawAmount.value);
   return amount >= 1 && amount <= balance.value.available && !withdrawing.value;
@@ -153,8 +200,9 @@ const canWithdraw = computed(() => {
 const filteredTransactions = computed(() => {
   if (activeTab.value === 'ALL') return transactions.value;
   if (activeTab.value === 'WITHDRAW') {
-    return transactions.value.filter(
-      (t) => t.description.includes('提现'),
+    return transactions.value.filter((t) =>
+      t.description?.includes('提现') ||
+      ['WITHDRAW', 'REFUND'].includes(t.type || '')
     );
   }
   return transactions.value.filter((t) => t.type === activeTab.value);
@@ -196,22 +244,22 @@ function getAmountDisplay(tx: Transaction): string {
   return `-${tx.amount.toFixed(2)}`;
 }
 
-function formatTime(isoStr: string): string {
-  const d = new Date(isoStr);
-  const now = new Date();
-  const diff = now.getTime() - d.getTime();
-  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-  const pad = (n: number) => n.toString().padStart(2, '0');
-  if (days === 0) {
-    return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  }
-  if (days < 7) return `${days}天前 ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
 async function loadBalance(): Promise<void> {
   try {
     balance.value = await walletApi.getBalance();
+  } catch {
+    // 使用默认值
+  }
+}
+
+async function loadProfitSharing(): Promise<void> {
+  try {
+    const [rules, fee] = await Promise.all([
+      profitSharingUserApi.listActive(),
+      profitSharingUserApi.wechatFeeRate(),
+    ]);
+    activeRules.value = rules;
+    wechatFee.value = fee;
   } catch {
     // 使用默认值
   }
@@ -242,7 +290,16 @@ async function loadMore(): Promise<void> {
   await loadTransactions();
 }
 
-function openWithdrawModal(): void {
+async function openWithdrawModal(): Promise<void> {
+  // 前置校验：须完成手机号绑定、银行卡绑定、实名认证
+  const ok = await requireVerification('提现');
+  if (!ok) return;
+
+  // 埋点：打开提现弹窗
+  tracker.track(EVENTS.WITHDRAW_OPEN, {
+    page: 'wallet',
+  });
+
   withdrawAmount.value = '';
   showWithdrawModal.value = true;
 }
@@ -262,6 +319,13 @@ async function submitWithdraw(): Promise<void> {
     return;
   }
 
+  // 埋点：提交提现申请
+  tracker.track(EVENTS.WITHDRAW_SUBMIT, {
+    page: 'wallet',
+    amount: amount,
+    available: balance.value.available,
+  });
+
   withdrawing.value = true;
   try {
     const result = await walletApi.withdraw(amount);
@@ -272,9 +336,24 @@ async function submitWithdraw(): Promise<void> {
     });
     showWithdrawModal.value = false;
     withdrawAmount.value = '';
+    
+    // 埋点：提现申请成功
+    tracker.track(EVENTS.WITHDRAW_SUCCESS, {
+      page: 'wallet',
+      amount: amount,
+      transactionId: result.transactionId || 'unknown',
+    });
+    
     // 刷新余额和流水
     await Promise.all([loadBalance(), loadTransactions(true)]);
   } catch (err) {
+    // 埋点：提现申请失败
+    tracker.track(EVENTS.WITHDRAW_FAIL, {
+      page: 'wallet',
+      amount: amount,
+      error: (err as Error).message || 'unknown',
+    });
+    
     uni.showToast({
       title: (err as Error).message || '提现失败，请重试',
       icon: 'none',
@@ -285,13 +364,14 @@ async function submitWithdraw(): Promise<void> {
   }
 }
 
-onMounted(async () => {
-  await loadBalance();
-  await loadTransactions(true);
-});
-
 onShow(async () => {
+  // 埋点：页面访问
+  tracker.track(EVENTS.PAGE_VIEW, {
+    page: 'wallet',
+  });
+  
   await loadBalance();
+  await loadProfitSharing();
   await loadTransactions(true);
 });
 </script>
@@ -326,8 +406,35 @@ onShow(async () => {
 
 .withdraw-btn {
   padding: 12rpx 32rpx;
-  background-color: rgba(255, 255, 255, 0.25);
+  background: #ff9800;
+  background: linear-gradient(135deg, #ff9800, #f57c00);
   border-radius: 30rpx;
+  box-shadow: 0 4rpx 12rpx rgba(255, 152, 0, 0.3);
+  position: relative;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.withdraw-btn::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+  transition: left 0.5s;
+}
+
+.withdraw-btn:active::before,
+.withdraw-btn.pressed::before {
+  left: 100%;
+}
+
+/* 为触摸设备添加兼容性 */
+.withdraw-btn:active {
+  transform: scale(0.98);
+  transition: transform 0.1s;
 }
 
 .withdraw-text {
@@ -366,6 +473,138 @@ onShow(async () => {
   height: 60rpx;
   background-color: rgba(255, 255, 255, 0.3);
   margin: 0 20rpx;
+}
+
+// 分佣比例卡片
+.profit-card {
+  margin: 0 24rpx 24rpx;
+  padding: 28rpx;
+  background-color: #fff;
+  border-radius: 20rpx;
+}
+
+.profit-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16rpx;
+}
+
+.profit-title {
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #333;
+}
+
+.profit-tag {
+  padding: 4rpx 16rpx;
+  background-color: #e3f2fd;
+  color: #1976d2;
+  font-size: 22rpx;
+  border-radius: 16rpx;
+}
+
+.wechat-fee-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16rpx 20rpx;
+  background-color: #fff8e1;
+  border-radius: 12rpx;
+}
+
+.fee-label {
+  font-size: 26rpx;
+  color: #795548;
+}
+
+.fee-value {
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #ff9800;
+}
+
+.fee-desc {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 22rpx;
+  color: #999;
+}
+
+.profit-divider {
+  height: 1rpx;
+  background-color: #f0f0f0;
+  margin: 20rpx 0;
+}
+
+.rule-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+.rule-item {
+  padding: 16rpx 20rpx;
+  background-color: #f9f9f9;
+  border-radius: 12rpx;
+}
+
+.rule-head-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12rpx;
+}
+
+.rule-name {
+  font-size: 28rpx;
+  color: #333;
+  font-weight: 600;
+}
+
+.rule-cat {
+  font-size: 22rpx;
+  color: #888;
+  padding: 4rpx 12rpx;
+  background-color: #e0e0e0;
+  border-radius: 12rpx;
+}
+
+.rule-rate-row {
+  display: flex;
+  gap: 24rpx;
+}
+
+.rate-cell {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+
+.rate-label {
+  font-size: 22rpx;
+  color: #999;
+}
+
+.rate-value {
+  font-size: 28rpx;
+  color: #333;
+  font-weight: 600;
+
+  &.helper {
+    color: #4caf50;
+  }
+}
+
+.rule-empty {
+  padding: 24rpx 0;
+  text-align: center;
+}
+
+.rule-empty-text {
+  font-size: 24rpx;
+  color: #999;
 }
 
 // Tab 切换

@@ -6,8 +6,8 @@
       scroll-y
       :scroll-top="scrollTop"
       :scroll-with-animation="true"
-      :lower-threshold="200"
-      @scrolltolower="onScrollLower"
+      :upper-threshold="200"
+      @scrolltoupper="onScrollLower"
     >
       <!-- 加载更早历史 -->
       <view v-if="loadingHistory" class="loading-history">
@@ -73,7 +73,7 @@
           </view>
 
           <!-- 发送状态 -->
-          <view class="bubble-status" v-if="isMine(msg.senderId) && msg._id !== 'pending_'">
+          <view v-if="isMine(msg.senderId) && msg._id !== 'pending_'" class="bubble-status">
             <text
               class="status-text"
               :class="getSendStatusClass(msg)"
@@ -94,15 +94,15 @@
     <view class="input-bar" :style="{ paddingBottom: safeBottom + 'px' }">
       <view
         class="icon-btn"
-        @tap="onPickImage"
         :disabled="sending"
+        @tap="onPickImage"
       >
         <text class="icon-emoji">📷</text>
       </view>
       <view class="input-wrap">
         <input
-          class="msg-input"
           v-model="inputText"
+          class="msg-input"
           placeholder="输入消息..."
           placeholder-class="input-ph"
           confirm-type="send"
@@ -124,11 +124,12 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref } from 'vue';
-import { onLoad, onReachBottom, onShow, onUnload } from '@dcloudio/uni-app';
+import { onLoad, onShow, onUnload } from '@dcloudio/uni-app';
 import { useChatStore } from '@/store/chat';
 import { useUserStore } from '@/store/user';
 import { chatApi } from '@/api/chat';
 import type { ChatMessage, MessageType } from '@/types/chat';
+import { tracker, EVENTS } from '@/utils/track';
 
 const chatStore = useChatStore();
 const userStore = useUserStore();
@@ -137,11 +138,14 @@ const userStore = useUserStore();
 const peerId = ref('');
 const peerNickname = ref('邻居');
 const peerAvatar = ref('');
+let lastLoadAt = 0;
+let markReadTimer: ReturnType<typeof setTimeout> | null = null;
+let onRealtimeMessage: ((msg: ChatMessage) => void) | null = null;
 
 const convId = computed(() => chatStore.buildConversationId(peerId.value));
 const peerInitial = computed(() => (peerNickname.value || '邻').slice(0, 1));
 
-// 导航栏标题
+// 导航栏标题和初始化（合并两处 onLoad）
 onLoad((opts) => {
   const o = opts as {
     peerId?: string;
@@ -153,6 +157,19 @@ onLoad((opts) => {
   if (o?.peerAvatar) peerAvatar.value = decodeURIComponent(o.peerAvatar);
 
   uni.setNavigationBarTitle({ title: peerNickname.value });
+  
+  // 埋点：进入聊天页面
+  tracker.track(EVENTS.PAGE_VIEW, {
+    page: 'chat',
+    peerId: peerId.value,
+    peerNickname: peerNickname.value,
+  });
+
+  // onLoad 只触发一次，在此完成初始化
+  if (peerId.value) {
+    init();
+    lastLoadAt = Date.now();
+  }
 });
 
 // ---- 消息列表 ----
@@ -195,42 +212,25 @@ async function init(): Promise<void> {
   chatStore.registerMessageHandler(onRealtimeMessage);
 
   // 标记会话已读
-  if (convId.value) {
-    await chatStore.markRead(convId.value);
-  }
+    if (convId.value) {
+      await chatStore.markRead(convId.value).catch((error) => {
+        console.warn('[Chat] 标记已读失败', error);
+      });
+    }
 }
 
-let onRealtimeMessage: ((msg: ChatMessage) => void) | null = null;
-let lastLoadAt = 0;
-let markReadTimer: ReturnType<typeof setTimeout> | null = null;
+// 移除重复声明，onRealtimeMessage、lastLoadAt、markReadTimer 已在第141-143行声明
 
 /** debounce 标记已读：2s 内多次收到消息只调用一次 mark_read，降低服务端 updateMany 压力 */
 function scheduleMarkRead(): void {
   if (markReadTimer) clearTimeout(markReadTimer);
   markReadTimer = setTimeout(() => {
-    chatStore.markRead(convId.value).catch(() => {});
+    chatStore.markRead(convId.value).catch((error) => {
+      console.warn('[Chat] 标记已读失败', error);
+    });
     markReadTimer = null;
   }, 2000);
 }
-
-onLoad((opts) => {
-  const o = opts as {
-    peerId?: string;
-    peerNickname?: string;
-    peerAvatar?: string;
-  } | undefined;
-  if (o?.peerId) peerId.value = o.peerId;
-  if (o?.peerNickname) peerNickname.value = decodeURIComponent(o.peerNickname);
-  if (o?.peerAvatar) peerAvatar.value = decodeURIComponent(o.peerAvatar);
-
-  uni.setNavigationBarTitle({ title: peerNickname.value });
-
-  // onLoad 只触发一次，在此完成初始化
-  if (peerId.value) {
-    init();
-    lastLoadAt = Date.now();
-  }
-});
 
 onShow(() => {
   if (!peerId.value) return;
@@ -240,7 +240,9 @@ onShow(() => {
     // 增量刷新：重新连接 WS（如需）+ 标记已读
     chatStore.connect();
     if (convId.value) {
-      chatStore.markRead(convId.value).catch(() => {});
+      chatStore.markRead(convId.value).catch((error) => {
+        console.warn('[Chat] 标记已读失败', error);
+      });
     }
     lastLoadAt = now;
   }
@@ -250,7 +252,9 @@ onUnload(() => {
   // 卸载前立即触发 pending 的已读标记，保证状态及时同步
   if (markReadTimer) {
     clearTimeout(markReadTimer);
-    chatStore.markRead(convId.value).catch(() => {});
+    chatStore.markRead(convId.value).catch((error) => {
+      console.warn('[Chat] 标记已读失败', error);
+    });
     markReadTimer = null;
   }
   chatStore.unregisterMessageHandler();
@@ -289,13 +293,8 @@ async function loadHistory(reset = false): Promise<void> {
   }
 }
 
-onReachBottom(() => {
-  // 反向：onReachBottom 用于加载更早历史（需要向上滚到顶），暂用 scrolltolower
-});
-
 function onScrollLower(): void {
-  // scroll-view 触底：加载更早消息（模拟"上滑加载更多"）
-  // 注：scroll-y 列表触底是加载新消息，此处改为"距顶一定距离"加载历史
+  // 滚动到顶部加载更早历史消息
   loadHistory();
 }
 
@@ -323,6 +322,14 @@ function genClientId(): string {
 async function onSendText(): Promise<void> {
   const text = inputText.value.trim();
   if (!text || sending.value) return;
+  
+  // 埋点：发送文本消息
+  tracker.track(EVENTS.CHAT_MESSAGE_SEND, {
+    messageType: 'TEXT',
+    peerId: peerId.value,
+    contentLength: text.length,
+  });
+  
   await doSend('TEXT', text);
   inputText.value = '';
 }
@@ -404,6 +411,13 @@ async function onPickImage(): Promise<void> {
     const uploadResult = await chatApi.upload(tempFile.tempFilePath);
     const url = uploadResult.url;
 
+    // 埋点：发送图片消息
+    tracker.track(EVENTS.CHAT_MESSAGE_SEND, {
+      messageType: 'IMAGE',
+      peerId: peerId.value,
+      fileSize: tempFile.size,
+    });
+
     await doSend('IMAGE', '[图片]', { url });
   } catch {
     // 用户取消静默
@@ -428,12 +442,13 @@ function previewImage(url: string): void {
 
 function openLocation(msg: ChatMessage): void {
   if (msg.type !== 'LOCATION' || !msg.metadata) return;
-  uni.openLocation({
-    latitude: msg.metadata.lat ?? 0,
-    longitude: msg.metadata.lng ?? 0,
-    address: msg.metadata.address ?? '',
-    fail: () => uni.showToast({ title: '打开地图失败', icon: 'none' }),
-  });
+  const lat = msg.metadata?.lat;
+  const lng = msg.metadata?.lng;
+  if (typeof lat !== 'number' || typeof lng !== 'number') {
+    uni.showToast({ title: '位置信息无效', icon: 'none' });
+    return;
+  }
+  uni.openLocation({ latitude: lat, longitude: lng, name: msg.content || '位置' });
 }
 
 function getSendStatusClass(msg: ChatMessage): string {

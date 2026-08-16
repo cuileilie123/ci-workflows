@@ -13,7 +13,6 @@ import {
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { TaskCategory } from '@prisma/client';
 
 export class CreateTaskDto {
   @ApiProperty({ description: '任务标题', example: '帮取快递', minLength: 2, maxLength: 50 })
@@ -22,9 +21,9 @@ export class CreateTaskDto {
   @MaxLength(50, { message: '标题最多 50 字' })
   title!: string;
 
-  @ApiProperty({ description: '任务分类', enum: TaskCategory, example: 'DELIVERY' })
-  @IsEnum(TaskCategory, { message: '分类不合法' })
-  category!: TaskCategory;
+  @ApiProperty({ description: '任务类别 ID（关联 task_categories 表）', example: '1' })
+  @IsString()
+  categoryId!: string;
 
   @ApiProperty({
     description: '任务描述',
@@ -80,4 +79,14 @@ export class CreateTaskDto {
   @IsOptional()
   @IsDateString()
   expireAt?: string;
+
+  @ApiPropertyOptional({
+    description: '紧急程度',
+    enum: ['LOW', 'NORMAL', 'HIGH', 'URGENT'],
+    example: 'NORMAL',
+    default: 'NORMAL',
+  })
+  @IsOptional()
+  @IsEnum(['LOW', 'NORMAL', 'HIGH', 'URGENT'])
+  urgency?: 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
 }

@@ -6,14 +6,18 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, Task, TaskCategory, TaskStatus } from '@prisma/client';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import { Prisma, Task, TaskStatus } from '@prisma/client';
 import * as ngeohash from 'ngeohash';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RedisService } from '../../common/redis.service';
 import { SensitiveService } from '../../common/sensitive.service';
+import { EsService } from '../search/es.service';
+import { VerificationService } from '../verification/verification.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { QueryTaskDto } from './dto/query-task.dto';
+import { generateUniqueOrderNo } from '../payment/order-no.util';
 
 const PAGE_SIZE = 20;
 const GEOHASH_PRECISION = 7; // ≈150m
@@ -26,9 +30,11 @@ export interface TaskListItem {
   id: string;
   title: string;
   price: Prisma.Decimal;
-  category: TaskCategory;
+  categoryId: bigint;
+  category?: { id: string; code: string; name: string; icon: string | null };
   status: TaskStatus;
   address: string;
+  urgency: 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
   images: unknown;
   distance?: number; // 米（附近列表有，搜索无）
   createdAt: Date;
@@ -50,13 +56,26 @@ export class TaskService {
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     private readonly sensitive: SensitiveService,
+    private readonly esService: EsService,
+    private readonly verification: VerificationService,
   ) {}
 
   // ============ 1. 发布任务 ============
   async create(userId: string, dto: CreateTaskDto): Promise<Task> {
+    // 前置校验：须完成手机号绑定、银行卡绑定、实名认证
+    await this.verification.requireVerified(BigInt(userId));
+
     // 敏感内容检测（title + description）
     this.sensitive.checkAndThrow(dto.title, '标题');
     this.sensitive.checkAndThrow(dto.description, '描述');
+
+    const categoryId = BigInt(dto.categoryId);
+    // 校验类别存在且启用
+    const category = await this.prisma.taskCategory.findUnique({
+      where: { id: categoryId },
+    });
+    if (!category) throw new BadRequestException('任务类别不存在');
+    if (!category.isActive) throw new BadRequestException('任务类别已禁用');
 
     const geohash = ngeohash.encode(dto.lat, dto.lng, GEOHASH_PRECISION);
     const expireAt = dto.expireAt
@@ -67,7 +86,7 @@ export class TaskService {
       throw new BadRequestException('截止时间必须晚于当前时间');
     }
 
-    return this.prisma.task.create({
+    const task = await this.prisma.task.create({
       data: {
         publisherId: BigInt(userId),
         title: dto.title,
@@ -77,11 +96,19 @@ export class TaskService {
         lng: dto.lng,
         geohash,
         address: dto.address,
-        category: dto.category,
+        categoryId,
+        urgency: dto.urgency ?? 'NORMAL',
         images: (dto.images ?? []) as unknown as Prisma.InputJsonValue,
         expireAt,
       },
     });
+
+    // 异步同步到 ES（不阻塞主流程）
+    this.esService.indexTask(task).catch((err) => {
+      this.logger.error(`ES sync failed: ${err.message}`);
+    });
+
+    return task;
   }
 
   // ============ 2. 附近任务列表 ============
@@ -96,7 +123,7 @@ export class TaskService {
     const hashes = [centerHash, ...ngeohash.neighbors(centerHash)];
 
     // 2. Redis 缓存
-    const cacheKey = `nearby:${centerHash}:${page}:${query.category ?? 'all'}`;
+    const cacheKey = `nearby:${centerHash}:${page}:${query.categoryId ?? 'all'}`;
     const cached = await this.redis.get(cacheKey);
     if (cached) {
       try {
@@ -112,7 +139,7 @@ export class TaskService {
       status: 'OPEN',
       expireAt: { gt: new Date() },
       deletedAt: null,
-      ...(query.category ? { category: query.category } : {}),
+      ...(query.categoryId ? { categoryId: BigInt(query.categoryId) } : {}),
     };
 
     const [total, tasks] = await Promise.all([
@@ -121,6 +148,7 @@ export class TaskService {
         where,
         include: {
           publisher: { select: { nickname: true, avatar: true } },
+          category: { select: { id: true, code: true, name: true, icon: true } },
         },
         skip: (page - 1) * PAGE_SIZE,
         take: PAGE_SIZE,
@@ -134,9 +162,18 @@ export class TaskService {
         id: t.id.toString(),
         title: t.title,
         price: t.price,
-        category: t.category,
+        categoryId: t.categoryId,
+        category: t.category
+          ? {
+              id: t.category.id.toString(),
+              code: t.category.code,
+              name: t.category.name,
+              icon: t.category.icon,
+            }
+          : undefined,
         status: t.status,
         address: t.address,
+        urgency: t.urgency || 'NORMAL',
         images: t.images,
         distance: this.calcDistance(query.lat!, query.lng!, Number(t.lat), Number(t.lng)),
         createdAt: t.createdAt,
@@ -175,6 +212,62 @@ export class TaskService {
     return task;
   }
 
+  // ============ 3b. 我的发布任务列表 ============
+  async myTasks(
+    userId: string,
+    options: { status?: string; page?: number },
+  ): Promise<TaskListResult> {
+    const page = options.page ?? 1;
+
+    const where: Prisma.TaskWhereInput = {
+      publisherId: BigInt(userId),
+      deletedAt: null,
+      ...(options.status ? { status: options.status as TaskStatus } : {}),
+    };
+
+    const [total, tasks] = await Promise.all([
+      this.prisma.task.count({ where }),
+      this.prisma.task.findMany({
+        where,
+        include: {
+          publisher: { select: { nickname: true, avatar: true } },
+          category: { select: { id: true, code: true, name: true, icon: true } },
+        },
+        skip: (page - 1) * PAGE_SIZE,
+        take: PAGE_SIZE,
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
+
+    const list: TaskListItem[] = tasks.map((t) => ({
+      id: t.id.toString(),
+      title: t.title,
+      price: t.price,
+      categoryId: t.categoryId,
+      category: t.category
+        ? {
+            id: t.category.id.toString(),
+            code: t.category.code,
+            name: t.category.name,
+            icon: t.category.icon,
+          }
+        : undefined,
+      status: t.status,
+      address: t.address,
+      urgency: t.urgency || 'NORMAL',
+      images: t.images,
+      createdAt: t.createdAt,
+      expireAt: t.expireAt,
+      publisher: t.publisher,
+    }));
+
+    return {
+      list,
+      page,
+      hasMore: page * PAGE_SIZE < total,
+    };
+  }
+
   // ============ 4. 更新任务（仅发布者，仅 OPEN） ============
   async update(userId: string, id: string, dto: UpdateTaskDto): Promise<Task> {
     const task = await this.getOwnedTask(userId, id);
@@ -186,41 +279,74 @@ export class TaskService {
     if (dto.description) this.sensitive.checkAndThrow(dto.description, '描述');
 
     // lat/lng 不在更新 DTO 里（OmitType 已排除）；其余字段直接透传
-    return this.prisma.task.update({
+    const updatedTask = await this.prisma.task.update({
       where: { id: BigInt(id) },
       data: dto as Prisma.TaskUpdateInput,
     });
+
+    // 同步到 ES
+    this.esService.updateTask(Number(id), dto as Partial<Task>).catch((err: Error) => {
+      this.logger.error(`ES update sync failed: ${err.message}`);
+    });
+
+    return updatedTask;
   }
 
   // ============ 5. 取消任务（仅发布者） ============
-  async cancel(userId: string, id: string): Promise<Task> {
+  async cancel(
+    userId: string,
+    id: string,
+  ): Promise<Task & { hasPaidOrder: boolean; orderId?: string }> {
     const task = await this.getOwnedTask(userId, id);
-    if (!['OPEN', 'ASSIGNED'].includes(task.status)) {
+    if (!['OPEN', 'ASSIGNED', 'EXPIRED'].includes(task.status)) {
       throw new BadRequestException('当前状态不可取消');
     }
-    return this.prisma.task.update({
+
+    // 检查是否有关联的已支付订单
+    const paidOrder = await this.prisma.order.findFirst({
+      where: {
+        taskId: BigInt(id),
+        isSupplement: false,
+        status: { in: ['PAID', 'IN_PROGRESS'] },
+      },
+      select: { id: true },
+    });
+
+    const cancelledTask = await this.prisma.task.update({
       where: { id: BigInt(id) },
       data: { status: 'CANCELLED' },
     });
+
+    // 同步到 ES
+    this.esService.updateTask(Number(id), { status: 'CANCELLED' }).catch((err) => {
+      this.logger.error(`ES cancel sync failed: ${err.message}`);
+    });
+
+    return {
+      ...cancelledTask,
+      hasPaidOrder: !!paidOrder,
+      orderId: paidOrder?.id.toString(),
+    };
   }
 
-  // ============ 6. 接单（分布式锁 + DB 条件更新） ============
+  // ============ 6. 报价接单（分布式锁 + DB 条件更新） ============
   async accept(userId: string, id: string): Promise<Task> {
+    // 前置校验：须完成手机号绑定、银行卡绑定、实名认证
+    await this.verification.requireVerified(BigInt(userId));
+
     const taskId = BigInt(id);
     const uid = BigInt(userId);
     const lockKey = `task:lock:${id}`;
 
-    // 1. Redis 分布式锁（增强版：看门狗告警 + 自动续期 + 安全释放）
     const lockHandle = await this.redis.acquireLock(lockKey, userId, ACCEPT_LOCK_TTL, {
-      context: `接单 taskId=${id}, userId=${userId}`,
-      alertThresholdMs: ACCEPT_LOCK_TTL * 1000 * 3, // 超过 3 倍 TTL（30s）触发告警
+      context: `报价接单 taskId=${id}, userId=${userId}`,
+      alertThresholdMs: ACCEPT_LOCK_TTL * 1000 * 3,
     });
     if (this.redis.isAvailable() && !lockHandle) {
-      throw new ConflictException('任务正在被接单，请稍后重试');
+      throw new ConflictException('任务正在被报价，请稍后重试');
     }
 
     try {
-      // 2. 前置校验
       const task = await this.prisma.task.findUnique({ where: { id: taskId } });
       if (!task || task.deletedAt) {
         throw new NotFoundException('任务不存在');
@@ -238,24 +364,130 @@ export class TaskService {
         throw new ForbiddenException('信用分不足，无法接单');
       }
 
-      // 3. DB 条件更新（原子操作，并发只有一个成功）
-      const result = await this.prisma.task.updateMany({
-        where: { id: taskId, status: 'OPEN' },
-        data: { status: 'ASSIGNED', helperId: uid },
+      // 检查是否已有BIDDING订单（同一接单人不能重复报价）
+      const existingBidding = await this.prisma.order.findFirst({
+        where: {
+          taskId,
+          helperId: uid,
+          status: 'BIDDING',
+        },
       });
-      if (result.count === 0) {
-        throw new ConflictException('任务已被接单');
+      if (existingBidding) {
+        throw new ConflictException('您已对该任务报价，请等待发布者确认');
       }
 
-      return (await this.prisma.task.findUnique({ where: { id: taskId } }))!;
+      // 创建BIDDING状态订单，报价24小时后自动过期
+      const quoteExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      const totalAmount = task.price ?? 0;
+      const platformFee = totalAmount.times(0.06);
+
+      const orderNo = await generateUniqueOrderNo(async (no) => {
+        const existing = await this.prisma.order.findUnique({ where: { orderNo: no } });
+        return !!existing;
+      });
+      await this.prisma.order.create({
+        data: {
+          orderNo,
+          taskId,
+          helperId: uid,
+          totalAmount,
+          platformFee,
+          status: 'BIDDING',
+          isSupplement: false,
+          quoteExpiresAt,
+        },
+      });
+
+      // 任务状态保持OPEN（多人可同时报价）
+      return task;
     } finally {
-      // 使用原子释放（Lua 脚本校验 value，防止误删他人锁）
       if (lockHandle) {
         await lockHandle.release();
       } else {
         await this.redis.del(lockKey);
       }
     }
+  }
+
+  // ============ 6b. 发布者确认接单人 ============
+  async confirmBid(userId: string, taskIdStr: string, orderIdStr: string): Promise<Task> {
+    const taskId = BigInt(taskIdStr);
+    const orderId = BigInt(orderIdStr);
+    const uid = BigInt(userId);
+
+    const task = await this.prisma.task.findUnique({ where: { id: taskId } });
+    if (!task || task.deletedAt) {
+      throw new NotFoundException('任务不存在');
+    }
+    if (task.publisherId !== uid) {
+      throw new ForbiddenException('只有任务发布者可确认接单人');
+    }
+    if (task.status !== 'OPEN') {
+      throw new ConflictException('任务状态不允许确认接单人');
+    }
+
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order || order.status !== 'BIDDING') {
+      throw new ConflictException('该报价不可确认');
+    }
+    if (order.taskId !== taskId) {
+      throw new BadRequestException('订单与任务不匹配');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      // 1. 将确认的订单变为PENDING（待支付）
+      await tx.order.update({
+        where: { id: orderId },
+        data: { status: 'PENDING', quoteExpiresAt: null },
+      });
+
+      // 2. 拒绝该任务下其他BIDDING订单
+      await tx.order.updateMany({
+        where: {
+          taskId,
+          status: 'BIDDING',
+          id: { not: orderId },
+        },
+        data: {
+          rejectedAt: new Date(),
+          rejectReason: '客户选择了其他接单人',
+        },
+      });
+
+      // 3. 更新任务状态为ASSIGNED
+      await tx.task.update({
+        where: { id: taskId },
+        data: { status: 'ASSIGNED', helperId: order.helperId },
+      });
+
+      const updated = await tx.task.findUnique({ where: { id: taskId } });
+      return updated!;
+    });
+  }
+
+  // ============ 6c. 发布者拒绝某个报价 ============
+  async rejectBid(userId: string, taskIdStr: string, orderIdStr: string): Promise<void> {
+    const taskId = BigInt(taskIdStr);
+    const orderId = BigInt(orderIdStr);
+    const uid = BigInt(userId);
+
+    const task = await this.prisma.task.findUnique({ where: { id: taskId } });
+    if (!task || task.publisherId !== uid) {
+      throw new ForbiddenException('无权操作');
+    }
+
+    const order = await this.prisma.order.findUnique({ where: { id: orderId } });
+    if (!order || order.status !== 'BIDDING') {
+      throw new ConflictException('该报价不可操作');
+    }
+
+    await this.prisma.order.update({
+      where: { id: orderId },
+      data: {
+        rejectedAt: new Date(),
+        rejectReason: '发布者拒绝',
+      },
+    });
   }
 
   // ============ 7. 开始服务（接单者） ============
@@ -276,10 +508,17 @@ export class TaskService {
     if (task.status !== 'IN_PROGRESS') {
       throw new BadRequestException('仅进行中(IN_PROGRESS)状态可确认完成');
     }
-    return this.prisma.task.update({
+    const completedTask = await this.prisma.task.update({
       where: { id: BigInt(id) },
       data: { status: 'COMPLETED' },
     });
+
+    // 同步到 ES
+    this.esService.updateTask(Number(id), { status: 'COMPLETED' }).catch((err) => {
+      this.logger.error(`ES complete sync failed: ${err.message}`);
+    });
+
+    return completedTask;
   }
 
   // ============ 9. 关键词搜索 ============
@@ -304,7 +543,10 @@ export class TaskService {
       this.prisma.task.count({ where }),
       this.prisma.task.findMany({
         where,
-        include: { publisher: { select: { nickname: true, avatar: true } } },
+        include: {
+          publisher: { select: { nickname: true, avatar: true } },
+          category: { select: { id: true, code: true, name: true, icon: true } },
+        },
         skip: (page - 1) * PAGE_SIZE,
         take: PAGE_SIZE,
         orderBy: { createdAt: 'desc' },
@@ -315,9 +557,18 @@ export class TaskService {
       id: t.id.toString(),
       title: this.highlight(t.title, kw),
       price: t.price,
-      category: t.category,
+      categoryId: t.categoryId,
+      category: t.category
+        ? {
+            id: t.category.id.toString(),
+            code: t.category.code,
+            name: t.category.name,
+            icon: t.category.icon,
+          }
+        : undefined,
       status: t.status,
       address: this.highlight(t.address, kw),
+      urgency: t.urgency || 'NORMAL',
       images: t.images,
       createdAt: t.createdAt,
       expireAt: t.expireAt,
@@ -374,5 +625,42 @@ export class TaskService {
   private highlight(text: string, q: string): string {
     const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     return text.replace(new RegExp(escaped, 'gi'), (m) => `<em>${m}</em>`);
+  }
+
+  // ============ 定时清理：过期BIDDING报价（每分钟执行） ============
+  @Cron(CronExpression.EVERY_MINUTE)
+  async expireBiddingOrders(): Promise<number> {
+    const now = new Date();
+
+    // 1. 过期未被确认的BIDDING报价（超过24小时）
+    const expiredResult = await this.prisma.order.updateMany({
+      where: {
+        status: 'BIDDING',
+        quoteExpiresAt: { lte: now },
+      },
+      data: {
+        status: 'CANCELLED',
+        rejectReason: '报价超时，已自动取消',
+      },
+    });
+
+    if (expiredResult.count > 0) {
+      this.logger.log(`[CRON] 清理过期BIDDING报价: ${expiredResult.count}条已超时取消`);
+    }
+
+    // 2. 被拒绝超过24小时的报价 → 标记为CANCELLED
+    const rejectedResult = await this.prisma.order.updateMany({
+      where: {
+        status: 'BIDDING',
+        rejectedAt: { lte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+      },
+      data: { status: 'CANCELLED' },
+    });
+
+    if (rejectedResult.count > 0) {
+      this.logger.log(`[CRON] 清理被拒绝报价: ${rejectedResult.count}条已过期`);
+    }
+
+    return expiredResult.count + rejectedResult.count;
   }
 }

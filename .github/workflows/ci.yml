@@ -10,6 +10,7 @@ env:
   DATABASE_URL: "mysql://root:test@localhost:3306/test_db"
   REDIS_URL: "redis://localhost:6379"
   NODE_ENV: test
+  PASS_RATE_THRESHOLD: "90"
 
 jobs:
   bff-check:
@@ -49,10 +50,31 @@ jobs:
           node-version: 20
       - run: pnpm install --frozen-lockfile
       - run: pnpm prisma generate
+
+      # 测试前清理 DB 脏数据（mock_user / 测试用户 / 财务设置单例 / 审计日志残留）
+      # 脚本在 DB 不可达或表未 migrate 时会友好跳过（exit 0），不阻断后续步骤
+      - name: Clean test data (before tests)
+        run: node ../scripts/cleanup-test-data.cjs --confirm -y
+
       - run: pnpm lint
       - name: Unit Tests
         run: pnpm test -- --passWithNoTests
       - name: Concurrent Deadlock Regression Tests
         run: pnpm test -- --testPathPatterns=deadlock --forceExit --detectOpenHandles
         timeout-minutes: 5
+        if: always()
+
+      - name: Build TypeScript (dist)
+        run: pnpm build
+        if: always()
+
+      - name: Order No. Uniqueness Concurrency Integration Test
+        run: node scripts/integration-order-no-concurrency.cjs
+        timeout-minutes: 3
+        if: always()
+
+      - name: Profit-Sharing Log Node Verification
+        run: node scripts/verify-profit-sharing-logs.cjs
+        working-directory: ${{ github.workspace }}
+        timeout-minutes: 2
         if: always()

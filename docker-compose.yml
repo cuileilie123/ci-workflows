@@ -58,6 +58,8 @@ services:
       - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
     volumes:
       - es_data:/usr/share/elasticsearch/data
+      - ./backend/search-service/plugins:/usr/share/elasticsearch/plugins:ro
+      - ./backend/search-service/config:/usr/share/elasticsearch/config:ro
 
   mongodb:
     image: mongo:7

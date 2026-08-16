@@ -12,6 +12,8 @@ const config: Config.InitialOptions = {
   testEnvironment: 'node',
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/$1',
+    '^@neighborhood-help/test-utils$': '<rootDir>/../../packages/test-utils/src',
+    '^@neighborhood-help/test-utils/(.*)$': '<rootDir>/../../packages/test-utils/src/$1',
   },
 };
 

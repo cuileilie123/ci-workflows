@@ -31,13 +31,29 @@ export const chatApi = {
         header: { Authorization: `Bearer ${token}` },
         success: (res) => {
           try {
-            const body = JSON.parse(res.data) as { code: number; data: UploadResult; message: string };
-            if (body.code === 0) {
-              resolve(body.data);
+            // 安全地解析响应数据
+            const parsed = JSON.parse(res.data);
+            
+            // 验证响应结构
+            if (typeof parsed === 'object' && parsed !== null) {
+              const body = parsed as { code: number; data: UploadResult; message: string };
+              
+              // 验证必需字段
+              if (typeof body.code !== 'number' || typeof body.data === 'undefined') {
+                reject(new Error('上传响应格式错误'));
+                return;
+              }
+              
+              if (body.code === 0) {
+                resolve(body.data);
+              } else {
+                reject(new Error(body.message || '上传失败'));
+              }
             } else {
-              reject(new Error(body.message || '上传失败'));
+              reject(new Error('上传响应格式错误'));
             }
-          } catch {
+          } catch (parseError) {
+            console.error('解析上传响应失败:', parseError);
             reject(new Error('上传响应解析失败'));
           }
         },
@@ -51,6 +67,13 @@ export const chatApi = {
     return request<{ modified: number }>({
       url: `/chat/read/${convId}`,
       method: 'PUT',
+    });
+  },
+
+  /** 查找在线客服 */
+  findCustomerService(): Promise<{ userId: string; nickname: string; avatar: string | null } | null> {
+    return request<{ userId: string; nickname: string; avatar: string | null } | null>({
+      url: '/chat/customer-service',
     });
   },
 };

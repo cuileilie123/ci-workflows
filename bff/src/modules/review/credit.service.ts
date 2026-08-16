@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 
 const MAX_CREDIT = 200;
@@ -9,7 +10,10 @@ const RECENT_REVIEWS_LIMIT = 50;
 export class CreditService {
   private readonly logger = new Logger(CreditService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly eventEmitter: EventEmitter2,
+  ) {}
 
   /**
    * 更新用户信用分
@@ -63,6 +67,12 @@ export class CreditService {
 
     this.logger.log(`信用分更新: userId=${userId}, score=${finalScore}, reviews=${reviews.length}`);
 
+    // 8. 低分告警
+    if (finalScore < 60) {
+      this.eventEmitter.emit('user.low_credit', { userId, score: finalScore });
+      this.logger.warn(`低分告警: userId=${userId}, score=${finalScore}`);
+    }
+
     return finalScore;
   }
 
@@ -80,8 +90,15 @@ export class CreditService {
     const uid = BigInt(userId);
 
     const user = await this.prisma.user.findUnique({ where: { id: uid } });
+    // 获取总评价数
+    const totalReviews = await this.prisma.review.count({
+      where: { revieweeId: uid },
+    });
+    // 限制查询最近 100 条评价用于计算分布和均分
     const reviews = await this.prisma.review.findMany({
       where: { revieweeId: uid },
+      orderBy: { createdAt: 'desc' },
+      take: 100,
     });
 
     const distribution: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
@@ -94,8 +111,8 @@ export class CreditService {
     return {
       score: user?.creditScore ?? 100,
       level: this.getLevelLabel(user?.creditScore ?? 100),
-      totalReviews: reviews.length,
-      avgRating: reviews.length > 0 ? Number((totalRating / reviews.length).toFixed(1)) : 0,
+      totalReviews,
+      avgRating: totalReviews > 0 ? Number((totalRating / reviews.length).toFixed(1)) : 0,
       distribution,
       completedCount: await this.getCompletedCount(uid),
     };

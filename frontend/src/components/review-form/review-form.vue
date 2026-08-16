@@ -37,8 +37,8 @@
     <view class="comment-section">
       <text class="section-label">文字评价</text>
       <textarea
-        class="comment-input"
         v-model="comment"
+        class="comment-input"
         :maxlength="500"
         placeholder="说说你的感受吧..."
         auto-height
@@ -62,7 +62,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 
-const props = defineProps<{
+defineProps<{
   orderId: string;
   revieweeId: string;
 }>();

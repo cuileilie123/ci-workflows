@@ -1,7 +1,6 @@
-import { IsNumber, IsOptional, IsString, IsEnum, Min, Max } from 'class-validator';
+import { IsNumber, IsOptional, IsString, Min, Max } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { TaskCategory } from '@prisma/client';
 
 export class QueryTaskDto {
   @ApiPropertyOptional({ description: '纬度', example: 23.1291 })
@@ -27,13 +26,23 @@ export class QueryTaskDto {
   @Type(() => Number)
   page?: number;
 
-  @ApiPropertyOptional({ description: '分类筛选', enum: TaskCategory })
+  @ApiPropertyOptional({ description: '任务类别 ID 筛选（关联 task_categories 表）', example: '1' })
   @IsOptional()
-  @IsEnum(TaskCategory)
-  category?: TaskCategory;
+  @IsString()
+  categoryId?: string;
 
   @ApiPropertyOptional({ description: '搜索关键词', example: '快递' })
   @IsOptional()
   @IsString()
   q?: string;
+
+  @ApiPropertyOptional({ description: '是否只看我发布的任务', example: true })
+  @IsOptional()
+  @Type(() => Boolean)
+  mine?: boolean;
+
+  @ApiPropertyOptional({ description: '是否只看我接的任务', example: true })
+  @IsOptional()
+  @Type(() => Boolean)
+  helper?: boolean;
 }

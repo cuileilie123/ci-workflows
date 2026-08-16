@@ -45,3 +45,88 @@ groups:
           severity: warning
         annotations:
           summary: "队列积压: {{ $value }} 条消息"
+
+      # ============================================================
+      # 分账（Profit-Sharing）告警规则
+      # 指标来源: bff 的 /metrics 端点 → profit_share_total{result=...}
+      # ============================================================
+
+      - alert: ProfitShareException
+        expr: increase(profit_share_total{result="exception"}[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "分账调用异常（LOG-PS-108）：最近 5 分钟发生 {{ $value }} 次"
+          description: "分账 API 调用抛出异常，订单已 PAID 但未分账。检查 [PROFIT-SHARE] ❌ 日志和对账任务。"
+
+      - alert: ProfitShareFail
+        expr: increase(profit_share_total{result="fail"}[10m]) > 3
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "分账未完成率偏高：最近 10 分钟 {{ $value }} 笔失败"
+          description: "分账返回 success=false（跳过或未启用）。检查 WX_PROFIT_SHARING_ENABLED 配置和接收方商户号。"
+
+      - alert: ProfitShareHighFailRate
+        expr: |
+          (
+            sum(rate(profit_share_total{result="fail"}[15m]))
+            /
+            clamp_min(sum(rate(profit_share_total[15m])), 0.001)
+          ) > 0.3
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "分账失败率 > 30%（15 分钟窗口）"
+          description: "当前失败率: {{ $value | humanizePercentage }}。可能原因：接收方配置错误、商户号被风控、或分账金额超限。"
+
+  # ============================================================
+  # CORS 拦截告警规则
+  # 指标来源: bff 的 /metrics 端点 → cors_blocked_total{origin,ip,method,path}
+  # 对应日志锚点: [LOG-CO-001] WARN（非法来源 403）
+  # 验证脚本: scripts/cors-preflight-alert-test.mjs
+  # ============================================================
+  - name: cors_alerts
+    rules:
+      - alert: CORSBlockedHigh
+        expr: sum(increase(cors_blocked_total[5m])) > 5
+        for: 2m
+        labels:
+          severity: warning
+          service: bff
+        annotations:
+          summary: "CORS 拦截量偏高：5 分钟内 {{ $value }} 次 403"
+          description: "对应日志锚点 [LOG-CO-001]。可能是探测/扫描行为，建议用 grep \"WARN [CORS] [LOG-CO-001]\" 查看 BFF 日志按 origin 聚合定位。"
+
+      - alert: CORSBlockedBurst
+        expr: sum(increase(cors_blocked_total[1m])) > 10
+        for: 0m
+        labels:
+          severity: critical
+          service: bff
+        annotations:
+          summary: "CORS 拦截突发：1 分钟内 {{ $value }} 次 403（疑似扫描器/CC 攻击）"
+          description: "对应日志锚点 [LOG-CO-001]。1 分钟窗口阈值 10 已被跨线，立即检查 BFF 日志和 nginx 访问日志，必要时对 Top origin 做 WAF 拦截。"
+
+      - alert: CORSBlockedByOriginSpam
+        expr: sum by (origin) (increase(cors_blocked_total[5m])) > 20
+        for: 1m
+        labels:
+          severity: critical
+          service: bff
+        annotations:
+          summary: "CORS 单 origin 针对性攻击：origin={{ $labels.origin }} 5 分钟内 {{ $value }} 次 403"
+          description: "对应日志锚点 [LOG-CO-001]。该 origin 已跨过 20 次/5min 阈值，建议在 nginx/WAF 层直接 deny 该 origin，避免 BFF 持续被打。"
+
+      - alert: CORSAllowedDown
+        expr: sum(increase(cors_allowed_total[15m])) == 0
+        for: 5m
+        labels:
+          severity: warning
+          service: bff
+        annotations:
+          summary: "CORS 合法放行 15 分钟内为 0"
+          description: "对应日志锚点 [LOG-CO-002]。可能原因：① 业务低峰期无 H5/小程序流量（正常）；② BFF 重启后 CORS_ORIGINS 未正确加载导致白名单失效（异常，需检查）；③ 前端域名变更未同步到 main.ts 的 parseCorsOrigins 默认白名单。"

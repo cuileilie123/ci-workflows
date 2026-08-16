@@ -12,6 +12,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { LockAlertService } from './lock-alert.service';
 import { RedisService } from './redis.service';
+import { createTestLogger } from '@neighborhood-help/test-utils';
 
 const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
 const REDIS_PORT = Number(process.env.REDIS_PORT) || 6379;
@@ -20,29 +21,38 @@ const REDIS_PORT = Number(process.env.REDIS_PORT) || 6379;
 let keyCounter = 0;
 const uniqueKey = (base: string) => `${base}:${Date.now()}:${keyCounter++}`;
 
+const log = createTestLogger('rate-limit.integration');
+
 describe('限流集成测试（真实 Redis）', () => {
   let redisService: RedisService;
+  let moduleRef: TestingModule;
   const usedKeys: string[] = [];
 
   beforeAll(async () => {
     process.env.REDIS_HOST = REDIS_HOST;
     process.env.REDIS_PORT = String(REDIS_PORT);
 
-    const module: TestingModule = await Test.createTestingModule({
+    log(`beforeAll: 创建 TestingModule（目标 Redis ${REDIS_HOST}:${REDIS_PORT}）`);
+    const t0 = Date.now();
+    moduleRef = await Test.createTestingModule({
       providers: [RedisService, LockAlertService],
     }).compile();
+    log(`beforeAll: TestingModule 编译完成，耗时 ${Date.now() - t0}ms`);
 
-    redisService = module.get<RedisService>(RedisService);
+    redisService = moduleRef.get<RedisService>(RedisService);
 
     // 等待 Redis 连接就绪（最多 10 秒）
+    log('beforeAll: 等待 Redis 连接就绪...');
     await new Promise((resolve, reject) => {
       const start = Date.now();
       const timer = setInterval(() => {
         if (redisService.isAvailable()) {
           clearInterval(timer);
+          log(`beforeAll: Redis 已连接就绪，等待耗时 ${Date.now() - start}ms`);
           resolve(true);
         } else if (Date.now() - start > 10000) {
           clearInterval(timer);
+          log('beforeAll: Redis 连接超时（10s）');
           reject(new Error('Redis 连接超时（10s），请确认 Redis 已在 localhost:6379 运行'));
         }
       }, 200);
@@ -62,7 +72,14 @@ describe('限流集成测试（真实 Redis）', () => {
   });
 
   afterAll(async () => {
+    log('afterAll: 清理限流测试 key');
     await redisService.del('test:ratelimit:cleanup');
+    log('afterAll: 测试 key 清理完成');
+    // 关闭模块，触发 onModuleDestroy 断开 Redis 连接
+    log('afterAll: 开始关闭 TestingModule（触发 onModuleDestroy → Redis quit）');
+    const t0 = Date.now();
+    await moduleRef.close();
+    log(`afterAll: TestingModule 已关闭，耗时 ${Date.now() - t0}ms，Redis 连接应已断开`);
   });
 
   it('✅ 首次请求应放行并返回正确计数', async () => {

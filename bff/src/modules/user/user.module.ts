@@ -1,9 +1,10 @@
 import { Module } from '@nestjs/common';
 import { GdprController } from './gdpr.controller';
+import { UserController } from './user.controller';
 import { PrismaService } from '../../prisma/prisma.service';
 
 @Module({
-  controllers: [GdprController],
+  controllers: [GdprController, UserController],
   providers: [PrismaService],
   exports: [PrismaService],
 })

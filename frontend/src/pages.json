@@ -7,35 +7,11 @@
       }
     },
     {
-      "path": "pages/auth/login",
-      "style": {
-        "navigationBarTitleText": "登录"
-      }
-    },
-    {
-      "path": "pages/task/publish",
-      "style": {
-        "navigationBarTitleText": "发布任务"
-      }
-    },
-    {
       "path": "pages/task/list",
       "style": {
         "navigationBarTitleText": "附近任务",
         "enablePullDownRefresh": true,
         "onReachBottomDistance": 50
-      }
-    },
-    {
-      "path": "pages/task/detail",
-      "style": {
-        "navigationBarTitleText": "任务详情"
-      }
-    },
-    {
-      "path": "pages/order/detail",
-      "style": {
-        "navigationBarTitleText": "订单详情"
       }
     },
     {
@@ -45,21 +21,63 @@
       }
     },
     {
-      "path": "pages/chat/chat",
-      "style": {
-        "navigationBarTitleText": "聊天"
-      }
-    },
-    {
       "path": "pages/user/profile",
       "style": {
         "navigationBarTitleText": "个人中心"
       }
     },
     {
+      "path": "pages/task/publish",
+      "style": {
+        "navigationBarTitleText": "发布任务"
+      }
+    },
+    {
+      "path": "pages/task/detail",
+      "style": {
+        "navigationBarTitleText": "任务详情"
+      }
+    },
+    {
+      "path": "pages/chat/chat",
+      "style": {
+        "navigationBarTitleText": "聊天"
+      }
+    },
+    {
       "path": "pages/user/wallet",
       "style": {
         "navigationBarTitleText": "我的钱包"
+      }
+    },
+    {
+      "path": "pages/user/settings",
+      "style": {
+        "navigationBarTitleText": "设置"
+      }
+    },
+    {
+      "path": "pages/user/reviews",
+      "style": {
+        "navigationBarTitleText": "我的评价"
+      }
+    },
+    {
+      "path": "pages/user/verification",
+      "style": {
+        "navigationBarTitleText": "认证中心"
+      }
+    },
+    {
+      "path": "pages/user/real-name",
+      "style": {
+        "navigationBarTitleText": "实名认证"
+      }
+    },
+    {
+      "path": "pages/user/bank-card",
+      "style": {
+        "navigationBarTitleText": "银行卡管理"
       }
     }
   ],
@@ -68,5 +86,163 @@
     "navigationBarTitleText": "邻里互助",
     "navigationBarBackgroundColor": "#4CAF50",
     "backgroundColor": "#F8F8F8"
-  }
+  },
+  "permission": {
+    "scope.userLocation": {
+      "desc": "你的位置信息将用于任务发布与附近任务搜索"
+    }
+  },
+  "requiredPrivateInfos": [
+    "getLocation",
+    "chooseLocation"
+  ],
+  "tabBar": {
+    "color": "#7A7E83",
+    "selectedColor": "#4CAF50",
+    "borderStyle": "black",
+    "backgroundColor": "#ffffff",
+    "list": [
+      {
+        "pagePath": "pages/index/index",
+        "iconPath": "static/home.png",
+        "selectedIconPath": "static/home-active.png",
+        "text": "首页"
+      },
+      {
+        "pagePath": "pages/task/list",
+        "iconPath": "static/task.png",
+        "selectedIconPath": "static/task-active.png",
+        "text": "任务"
+      },
+      {
+        "pagePath": "pages/chat/list",
+        "iconPath": "static/chat.png",
+        "selectedIconPath": "static/chat-active.png",
+        "text": "消息"
+      },
+      {
+        "pagePath": "pages/user/profile",
+        "iconPath": "static/profile.png",
+        "selectedIconPath": "static/profile-active.png",
+        "text": "我的"
+      }
+    ]
+  },
+  "subPackages": [
+    {
+      "root": "pages/auth",
+      "pages": [
+        {
+          "path": "login",
+          "style": {
+            "navigationBarTitleText": "登录"
+          }
+        }
+      ]
+    },
+    {
+      "root": "pages/order",
+      "pages": [
+        {
+          "path": "list",
+          "style": {
+            "navigationBarTitleText": "订单列表",
+            "enablePullDownRefresh": true,
+            "onReachBottomDistance": 100
+          }
+        },
+        {
+          "path": "detail",
+          "style": {
+            "navigationBarTitleText": "订单详情"
+          }
+        }
+      ]
+    },
+    {
+      "root": "pages/review",
+      "pages": [
+        {
+          "path": "create",
+          "style": {
+            "navigationBarTitleText": "评价"
+          }
+        }
+      ]
+    },
+    {
+      "root": "pages/helper",
+      "pages": [
+        {
+          "path": "index",
+          "style": {
+            "navigationBarTitleText": "帮助者中心"
+          }
+        }
+      ]
+    },
+    {
+      "root": "pages/map",
+      "pages": [
+        {
+          "path": "picker",
+          "style": {
+            "navigationBarTitleText": "选择位置"
+          }
+        }
+      ]
+    },
+    {
+      "root": "pages/search",
+      "pages": [
+        {
+          "path": "index",
+          "style": {
+            "navigationBarTitleText": "搜索任务"
+          }
+        }
+      ]
+    },
+    {
+      "root": "pages/admin",
+      "pages": [
+        {
+          "path": "index",
+          "style": {
+            "navigationBarTitleText": "中端管理"
+          }
+        },
+        {
+          "path": "finance-settings",
+          "style": {
+            "navigationBarTitleText": "财务设置"
+          }
+        },
+        {
+          "path": "profit-sharing",
+          "style": {
+            "navigationBarTitleText": "分佣比例管理"
+          }
+        },
+        {
+          "path": "task-category",
+          "style": {
+            "navigationBarTitleText": "任务分类管理"
+          }
+        },
+        {
+          "path": "order-price",
+          "style": {
+            "navigationBarTitleText": "订单改价"
+          }
+        },
+        {
+          "path": "permissions",
+          "style": {
+            "navigationBarTitleText": "工作人员权限"
+          }
+        }
+      ]
+    }
+  ]
 }

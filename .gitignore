@@ -69,6 +69,7 @@ mongo_data/
 
 # ===== Go =====
 backend/risk-service/risk-service
+backend/risk-service/risk-service.exe
 backend/risk-service/coverage.out
 
 # ===== Java =====
@@ -88,6 +89,10 @@ test-chat-*.cjs
 test-listener-leak.cjs
 verify-conversations.cjs
 bff/scripts/_abba_env.ps1
+
+# ===== 敏感临时文件 =====
+bff/scripts/.mock-tokens.json
+project.private.config.json
 
 # ===== IDE 工作区 =====
 *.code-workspace

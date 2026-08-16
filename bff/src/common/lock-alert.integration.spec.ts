@@ -12,6 +12,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { LockAlertService } from './lock-alert.service';
 import { RedisService } from './redis.service';
+import { createTestLogger } from '@neighborhood-help/test-utils';
 
 const REDIS_HOST = process.env.REDIS_HOST || 'localhost';
 const REDIS_PORT = Number(process.env.REDIS_PORT) || 6379;
@@ -20,30 +21,39 @@ const REDIS_PORT = Number(process.env.REDIS_PORT) || 6379;
 let keyCounter = 0;
 const uniqueKey = (base: string) => `${base}:${Date.now()}:${keyCounter++}`;
 
+const log = createTestLogger('lock-alert.integration');
+
 describe('分布式锁告警集成测试（真实 Redis）', () => {
   let redisService: RedisService;
   let lockAlert: LockAlertService;
+  let moduleRef: TestingModule;
   const acquiredHandles: Array<{ release: () => Promise<boolean>; getKey: () => string }> = [];
 
   beforeAll(async () => {
     process.env.REDIS_HOST = REDIS_HOST;
     process.env.REDIS_PORT = String(REDIS_PORT);
 
-    const module: TestingModule = await Test.createTestingModule({
+    log(`beforeAll: 创建 TestingModule（目标 Redis ${REDIS_HOST}:${REDIS_PORT}）`);
+    const t0 = Date.now();
+    moduleRef = await Test.createTestingModule({
       providers: [RedisService, LockAlertService],
     }).compile();
+    log(`beforeAll: TestingModule 编译完成，耗时 ${Date.now() - t0}ms`);
 
-    redisService = module.get<RedisService>(RedisService);
-    lockAlert = module.get<LockAlertService>(LockAlertService);
+    redisService = moduleRef.get<RedisService>(RedisService);
+    lockAlert = moduleRef.get<LockAlertService>(LockAlertService);
 
+    log('beforeAll: 等待 Redis 连接就绪...');
     await new Promise((resolve, reject) => {
       const start = Date.now();
       const timer = setInterval(() => {
         if (redisService.isAvailable()) {
           clearInterval(timer);
+          log(`beforeAll: Redis 已连接就绪，等待耗时 ${Date.now() - start}ms`);
           resolve(true);
         } else if (Date.now() - start > 10000) {
           clearInterval(timer);
+          log('beforeAll: Redis 连接超时（10s）');
           reject(new Error('Redis 连接超时（10s）'));
         }
       }, 200);
@@ -64,9 +74,16 @@ describe('分布式锁告警集成测试（真实 Redis）', () => {
 
   afterAll(async () => {
     // 最终清理：扫描并删除所有测试 key
+    log('afterAll: 开始清理测试 key');
     for (let i = 0; i < 100; i++) {
       await redisService.del(`test:lock:integration:cleanup:${i}`);
     }
+    log('afterAll: 测试 key 清理完成');
+    // 关闭模块，触发 onModuleDestroy 断开 Redis 连接
+    log('afterAll: 开始关闭 TestingModule（触发 onModuleDestroy → Redis quit）');
+    const t0 = Date.now();
+    await moduleRef.close();
+    log(`afterAll: TestingModule 已关闭，耗时 ${Date.now() - t0}ms，Redis 连接应已断开`);
   });
 
   const trackHandle = (handle: any) => {

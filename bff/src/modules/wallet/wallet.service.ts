@@ -38,7 +38,9 @@ export class WalletService {
        FOR UPDATE`;
 
     if (!rows || rows.length === 0) {
-      this.logger.warn(`${tag} [LOCK-${ctx ? `${ctx.seq}/${ctx.total}` : '-'}] 获取锁失败 - 钱包不存在: userId=${userId.toString()}`);
+      this.logger.warn(
+        `${tag} [LOCK-${ctx ? `${ctx.seq}/${ctx.total}` : '-'}] 获取锁失败 - 钱包不存在: userId=${userId.toString()}`,
+      );
       return null;
     }
 

@@ -12,6 +12,7 @@ module.exports = {
     plus: 'readonly',
     getCurrentPages: 'readonly',
     getApp: 'readonly',
+    QQMapWX: 'readonly',
   },
   extends: [
     'eslint:recommended',

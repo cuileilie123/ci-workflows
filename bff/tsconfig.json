@@ -21,7 +21,9 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@neighborhood-help/test-utils": ["../packages/test-utils/src"],
+      "@neighborhood-help/test-utils/*": ["../packages/test-utils/src/*"]
     }
   },
   "include": ["src/**/*"],

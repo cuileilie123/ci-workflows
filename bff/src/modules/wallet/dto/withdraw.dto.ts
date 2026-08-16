@@ -1,4 +1,5 @@
-import { IsNumber, IsNotEmpty, Min, Max } from 'class-validator';
+import { IsNumber, IsNotEmpty, Min, Max, IsOptional, IsString, IsIn } from 'class-validator';
+import { Type } from 'class-transformer';
 
 export class WithdrawDto {
   @IsNumber({}, { message: '提现金额必须为数字' })
@@ -17,11 +18,26 @@ export class TransferDto {
   @IsNotEmpty({ message: '接收方用户ID不能为空' })
   toUserId!: string;
 
+  @IsOptional()
+  @IsString()
   description?: string;
 }
 
 export class TransactionQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
   page?: number = 1;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  @Max(100)
   pageSize?: number = 20;
+
+  @IsOptional()
+  @IsIn(['INCOME', 'EXPENSE', 'FREEZE', 'UNFREEZE'])
   type?: 'INCOME' | 'EXPENSE' | 'FREEZE' | 'UNFREEZE';
 }

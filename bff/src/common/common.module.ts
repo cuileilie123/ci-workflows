@@ -3,6 +3,8 @@ import { TokenBlacklistService } from './token-blacklist.service';
 import { SensitiveService } from './sensitive.service';
 import { RedisService } from './redis.service';
 import { LockAlertService } from './lock-alert.service';
+import { MetricsService } from './metrics.service';
+import { MetricsController } from './metrics.controller';
 
 /**
  * 全局公共模块：提供跨模块共享的单例服务。
@@ -10,7 +12,8 @@ import { LockAlertService } from './lock-alert.service';
  */
 @Global()
 @Module({
-  providers: [TokenBlacklistService, SensitiveService, RedisService, LockAlertService],
-  exports: [TokenBlacklistService, SensitiveService, RedisService, LockAlertService],
+  controllers: [MetricsController],
+  providers: [TokenBlacklistService, SensitiveService, RedisService, LockAlertService, MetricsService],
+  exports: [TokenBlacklistService, SensitiveService, RedisService, LockAlertService, MetricsService],
 })
 export class CommonModule {}

@@ -12,6 +12,8 @@ export interface RequestOptions {
   header?: Record<string, string>;
   /** 内部标记：跳过 401 自动刷新（refresh 接口自身使用，防止递归） */
   _skipAuthRefresh?: boolean;
+  /** 内部标记：静默模式，失败时不弹 toast（埋点等非关键请求使用） */
+  _silent?: boolean;
 }
 
 // ---- Token 存储 ----
@@ -52,7 +54,7 @@ function rawRequest<T>(url: string, method: string, data?: Record<string, unknow
   return new Promise((resolve, reject) => {
     uni.request({
       url: `${BASE_URL}${url}`,
-      method: method as 'GET' | 'POST' | 'PUT' | 'DELETE',
+      method: method as 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH',
       data,
       header: { 'Content-Type': 'application/json' },
       success: (res) => resolve(res.data as ApiResponse<T>),
@@ -87,9 +89,10 @@ function refreshOnce(): Promise<string | null> {
 }
 
 function send<T>(options: RequestOptions, token: string): Promise<ApiResponse<T>> {
+  const fullUrl = `${BASE_URL}${options.url}`;
   return new Promise((resolve, reject) => {
     uni.request({
-      url: `${BASE_URL}${options.url}`,
+      url: fullUrl,
       method: options.method ?? 'GET',
       data: options.data,
       header: {
@@ -140,12 +143,43 @@ export function request<T>(options: RequestOptions): Promise<T> {
 
         // 其他业务错误
         const msg = body.message || '请求失败';
-        uni.showToast({ title: msg, icon: 'none' });
+        if (!options._silent) {
+          uni.showToast({ title: msg, icon: 'none' });
+        }
         reject(new Error(msg));
       })
       .catch((err: Error) => {
-        uni.showToast({ title: err.message || '网络错误', icon: 'none' });
+        if (!options._silent) {
+          uni.showToast({ title: err.message || '网络错误', icon: 'none' });
+        }
         reject(err);
       });
   });
 }
+
+/** 防抖函数 */
+export function debounce<T extends (...args: never[]) => unknown>(fn: T, delay: number): (...args: Parameters<T>) => void {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  return function (this: unknown, ...args: Parameters<T>) {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      fn.apply(this, args);
+    }, delay);
+  };
+}
+
+/** HTTP 快捷方法 */
+export const http = {
+  get<T>(url: string, params?: Record<string, unknown>) {
+    return request<T>({ url, method: 'GET', data: params });
+  },
+  post<T>(url: string, data?: Record<string, unknown>) {
+    return request<T>({ url, method: 'POST', data });
+  },
+  put<T>(url: string, data?: Record<string, unknown>) {
+    return request<T>({ url, method: 'PUT', data });
+  },
+  delete<T>(url: string, data?: Record<string, unknown>) {
+    return request<T>({ url, method: 'DELETE', data });
+  },
+};

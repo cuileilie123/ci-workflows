@@ -202,6 +202,28 @@ export class ChatService {
     });
   }
 
+  /** 查找在线客服（第一个 ADMIN 或 STAFF 用户） */
+  async findCustomerService(): Promise<{
+    userId: string;
+    nickname: string;
+    avatar: string | null;
+  } | null> {
+    const user = await this.prisma.user.findFirst({
+      where: {
+        role: { in: ['ADMIN', 'STAFF'] },
+        status: 'ACTIVE',
+      },
+      orderBy: { id: 'asc' },
+      select: { id: true, nickname: true, avatar: true },
+    });
+    if (!user) return null;
+    return {
+      userId: user.id.toString(),
+      nickname: user.nickname,
+      avatar: user.avatar,
+    };
+  }
+
   // ---- 离线消息队列（Redis List）----
 
   /** 离线消息入队 */
